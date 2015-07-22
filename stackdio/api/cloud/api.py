@@ -145,6 +145,16 @@ class CloudAccountDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = serializers.CloudAccountSerializer
     permission_classes = (StackdioObjectPermissions,)
 
+    def retrieve(self, request, *args, **kwargs):
+        response = super(CloudAccountDetailAPIView, self).retrieve(request, *args, **kwargs)
+        account = self.get_object()
+
+        driver = account.get_driver()
+
+        response.data['sizes'] = driver.get_instance_sizes()
+
+        return response
+
     def destroy(self, request, *args, **kwargs):
         # check for profiles using this account before deleting
         profiles = set(self.get_object().profiles.all())

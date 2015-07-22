@@ -20,6 +20,7 @@
 Amazon Web Services provider for stackd.io
 """
 
+import json
 import logging
 import os
 import re
@@ -30,6 +31,7 @@ from time import sleep
 import boto
 import boto.ec2
 import boto.vpc
+import requests
 import yaml
 from boto.route53.record import ResourceRecordSets
 
@@ -218,6 +220,46 @@ class Route53Domain(object):
             rr.add_value(v)
 
 
+def parse_jsonp(jsonp_str):
+    # We get some jsonp junk back from aws... we can't really use that very well
+
+    # First we pull the javascript nastiness off of the return string
+    start_seq = 'callback('
+    end_seq = ')'
+
+    start = jsonp_str.index(start_seq) + len(start_seq)
+    end = jsonp_str.index(end_seq)
+
+    # Now we have something that mostly resembles json - but the keys don't have quotes (") around
+    # them, so python will complain
+    text = jsonp_str[start:end]
+
+    # This regex replace will add quotes around all the JSON object keys,
+    # so python can validly parse the JSON string
+    json_str = re.sub(
+        r'(?P<start>[\{,])(?P<key>[A-Za-z]+):',
+        '\g<start>\"\g<key>\":',
+        text
+    )
+
+    # Now we have a valid JSON string (!!) so we can parse it into a python dict.
+    data = json.loads(json_str)
+
+    # Next, just pick out the parts we want
+    for region in data['config']['regions']:
+        if region['region'] == 'us-east-1':
+            ret = []
+            for itype in region['instanceTypes']:
+                for size in itype['sizes']:
+                    size['price'] = size['valueColumns'][0]['prices']['USD']
+                    size['type'] = itype['type']
+                    del size['valueColumns']
+                    ret.append(size)
+            return ret
+
+    return []
+
+
 class AWSCloudProvider(BaseCloudProvider):
     SHORT_NAME = 'ec2'
     LONG_NAME = 'Amazon Web Services'
@@ -253,6 +295,18 @@ class AWSCloudProvider(BaseCloudProvider):
     STATE_RUNNING = 'running'
     STATE_SHUTTING_DOWN = 'shutting-down'
     STATE_TERMINATED = 'terminated'
+
+    def get_instance_sizes(self):
+        r = requests.get('http://a0.awsstatic.com/pricing/1/ec2/linux-od.min.js')
+
+        sizes = parse_jsonp(r.text)
+
+        r = requests.get('http://a0.awsstatic.com/pricing/1/ec2/previous-generation/linux-od.min.js')
+
+        sizes.extend(parse_jsonp(r.text))
+
+        return sizes
+
 
     @classmethod
     def get_required_fields(cls):
