@@ -20,6 +20,7 @@
                 'spin',
                 'typeahead',
                 'underscore',
+                'websocket',
                 'utils/mobile-fix',
                 'utils/class',
                 'utils/utils',

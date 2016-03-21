@@ -18,9 +18,10 @@
 define([
     'jquery',
     'knockout',
+    'websocket',
     'utils/class',
     'fuelux'
-], function ($, ko, Class) {
+], function ($, ko, ReconnectingWebSocket, Class) {
     'use strict';
     
     return Class.extend({
@@ -136,11 +137,22 @@ define([
             }, this);
 
             if (this.autoRefresh) {
-                this.intervalId = setInterval((function (self) {
-                    return function() {
-                        self.reload();
-                    }
-                })(this), 3000);
+                var ws_scheme = window.location.protocol == "https:" ? "wss" : "ws";
+                var ws = new ReconnectingWebSocket(ws_scheme + '://' + window.location.host + '/stackdio', null, {debug: true});
+                ws.onmessage = function (msg) {
+                    console.log(msg);
+                    self.reload();
+                };
+
+                ws.onopen = function (msg) {
+                    ws.send(JSON.stringify({test: 'foo'}));
+                };
+
+//                this.intervalId = setInterval((function (self) {
+//                    return function() {
+//                        self.reload();
+//                    }
+//                })(this), 3000);
             }
         },
 

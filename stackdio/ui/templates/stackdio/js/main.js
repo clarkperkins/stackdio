@@ -36,7 +36,8 @@ requirejs.config({
         'select2': '{{ bower_path }}/select2/dist/js/select2',
         'spin': '{{ bower_path }}/ladda/js/spin',
         'typeahead': '{{ bower_path }}/typeahead.js/dist/typeahead.jquery',
-        'underscore': '{{ bower_path }}/underscore/underscore'
+        'underscore': '{{ bower_path }}/underscore/underscore',
+        'websocket': '{{ bower_path }}/reconnectingWebsocket/reconnecting-websocket'
     },
     shim: {
         bootstrap: {

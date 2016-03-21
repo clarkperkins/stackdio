@@ -90,6 +90,7 @@ INSTALLED_APPS = (
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'channels',
     'guardian',
     'stackdio.core',
     'stackdio.api.users',
@@ -284,6 +285,19 @@ LOGGING = {
             'propagate': False,
         },
     }
+}
+
+##
+# Channels configuration
+##
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'asgi_redis.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [os.environ.get('REDIS_URL', 'redis://localhost:6379')],
+        },
+        'ROUTING': 'stackdio.server.routing.channel_routing',
+    },
 }
 
 ##

@@ -24,6 +24,7 @@ import socket
 
 import salt.cloud
 import yaml
+from channels.channel import Group
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericRelation
 from django.core.cache import cache
@@ -287,6 +288,9 @@ class Stack(TimeStampedModel, TitleSlugDescriptionModel, StatusModel):
         self.save()
         self.history.create(event=event, status=status,
                             status_detail=detail, level=level)
+        Group('/stackdio').send({
+            'status': status,
+        })
 
     def get_driver_hosts_map(self, host_ids=None):
         """

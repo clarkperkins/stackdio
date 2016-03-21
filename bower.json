@@ -33,6 +33,7 @@
         "knockout": "~3.3.0",
         "ladda": "~0.9.8",
         "moment": "~2.10.6",
+        "reconnectingWebsocket": "~1.0.0",
         "requirejs": "~2.1.20",
         "requirejs-domReady": "~2.0.1",
         "select2": "~4.0.0",
