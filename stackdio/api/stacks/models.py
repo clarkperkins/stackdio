@@ -289,7 +289,7 @@ class Stack(TimeStampedModel, TitleSlugDescriptionModel, StatusModel):
         self.history.create(event=event, status=status,
                             status_detail=detail, level=level)
         Group('/stackdio').send({
-            'status': status,
+            'text': '{}',
         })
 
     def get_driver_hosts_map(self, host_ids=None):

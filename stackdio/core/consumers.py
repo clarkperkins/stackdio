@@ -32,9 +32,8 @@ def ws_connect(message):
 
 
 @channel_session
-def ws_receive(message):
-    logger.info(message.content)
-    message.reply_channel.send({'msg': 'YAYYYYY'})
+def ws_keepalive(message):
+    Group(message.channel_session['path']).add(message.reply_channel)
 
 
 @channel_session

@@ -19,8 +19,9 @@ from channels.staticfiles import StaticFilesConsumer
 
 
 channel_routing = {
-    # 'http.request': StaticFilesConsumer(),
+    'http.request': StaticFilesConsumer(),
     'websocket.connect': 'stackdio.core.consumers.ws_connect',
-    'websocket.receive': 'stackdio.core.consumers.ws_receive',
+    'websocket.keepalive': 'stackdio.core.consumers.ws_keepalive',
+    # 'websocket.receive': 'stackdio.core.consumers.ws_receive',
     'websocket.disconnect': 'stackdio.core.consumers.ws_disconnect',
 }

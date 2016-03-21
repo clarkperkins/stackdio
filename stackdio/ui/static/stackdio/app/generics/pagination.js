@@ -138,14 +138,9 @@ define([
 
             if (this.autoRefresh) {
                 var ws_scheme = window.location.protocol == "https:" ? "wss" : "ws";
-                var ws = new ReconnectingWebSocket(ws_scheme + '://' + window.location.host + '/stackdio', null, {debug: true});
+                var ws = new ReconnectingWebSocket(ws_scheme + '://' + window.location.host + '/stackdio');
                 ws.onmessage = function (msg) {
-                    console.log(msg);
                     self.reload();
-                };
-
-                ws.onopen = function (msg) {
-                    ws.send(JSON.stringify({test: 'foo'}));
                 };
 
 //                this.intervalId = setInterval((function (self) {
