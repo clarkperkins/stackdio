@@ -102,6 +102,7 @@ testing_requirements = [
     'mock',
     'pep8',
     'pylint<=1.2.0',
+    'pytest',
     'pytest-cov',
     'pytest-django',
 ]
