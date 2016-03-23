@@ -82,7 +82,7 @@ requirements = [
     'asgi-redis>=0.8,<0.9',
     'boto>=2.32.0',
     'celery>=3.1',
-    'channels>=0.9,<1.0',
+    'channels>=0.10,<1.0',
     'dj-database-url>=0.3',
     'django-auth-ldap>=1.2.7',
     'django-extensions>=1.5,<1.5.6',
@@ -123,10 +123,6 @@ setup(
     zip_safe=False,
     install_requires=requirements,
     extras_require={
-        'production': [
-            'gunicorn>=19.0',
-            'supervisor>=3.0',
-        ],
         'mysql': [
             'MySQL-python==1.2.5',
         ],
