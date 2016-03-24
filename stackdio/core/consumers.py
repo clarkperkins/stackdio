@@ -32,11 +32,6 @@ def ws_connect(message):
 
 
 @channel_session_user
-def ws_keepalive(message):
-    Group(message.channel_session['path']).add(message.reply_channel)
-
-
-@channel_session_user
 def ws_disconnect(message):
     # Just remove it from the group
     Group(message.channel_session['path']).discard(message.reply_channel)

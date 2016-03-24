@@ -346,7 +346,7 @@ CLOUD_PROVIDERS = (
 ##
 # Celery & RabbitMQ
 ##
-BROKER_URL = 'amqp://guest:guest@localhost:5672/'
+BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379')
 CELERY_REDIRECT_STDOUTS = False
 CELERY_DEFAULT_QUEUE = 'default'
 

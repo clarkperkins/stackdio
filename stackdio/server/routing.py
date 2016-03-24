@@ -19,7 +19,6 @@ from channels.routing import route
 
 channel_routing = [
     route('websocket.connect', 'stackdio.core.consumers.ws_connect'),
-    route('websocket.keepalive', 'stackdio.core.consumers.ws_keepalive'),
     # route('websocket.receive', 'stackdio.core.consumers.ws_receive'),
     route('websocket.disconnect', 'stackdio.core.consumers.ws_disconnect'),
 ]

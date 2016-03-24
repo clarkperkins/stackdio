@@ -22,6 +22,9 @@ import sys
 
 from setuptools import setup, find_packages
 
+# Grab the current version from our stackdio package
+from stackdio.server import __version__
+
 major = sys.version_info[0]
 minor = sys.version_info[1]
 micro = sys.version_info[2]
@@ -62,9 +65,6 @@ if not os.path.exists(components_dir):
     sys.stderr.write(err_msg)
     sys.exit(1)
 
-# Grab the current version from our stackdio package
-from stackdio.server import __version__
-
 # Short and long descriptions for our package
 SHORT_DESCRIPTION = ('A cloud deployment, automation, and orchestration '
                      'platform for everyone.')
@@ -74,6 +74,7 @@ with open('README.rst') as f:
     LONG_DESCRIPTION = f.read()
 
 requirements = [
+    'asgi-redis>=0.9,<1.0',
     'boto>=2.32.0',
     'celery>=3.1',
     'channels>=0.10,<1.0',
