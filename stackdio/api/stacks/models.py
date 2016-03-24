@@ -24,7 +24,6 @@ import socket
 
 import salt.cloud
 import yaml
-from channels.channel import Group
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericRelation
 from django.core.cache import cache
@@ -40,6 +39,7 @@ from guardian.shortcuts import get_users_with_perms
 from model_utils import Choices
 from model_utils.models import StatusModel
 
+from stackdio.core.channel import StackdioGroup
 from stackdio.core.fields import DeletingFileField
 from stackdio.core.utils import recursive_update
 from stackdio.api.cloud.models import SecurityGroup
@@ -288,8 +288,11 @@ class Stack(TimeStampedModel, TitleSlugDescriptionModel, StatusModel):
         self.save()
         self.history.create(event=event, status=status,
                             status_detail=detail, level=level)
-        Group('/stackdio').send({
-            'text': '{}',
+
+        # Generate our notifications
+        StackdioGroup('/stacks').send({})
+        StackdioGroup('/stacks/%s' % self.id).send({
+            'status': status,
         })
 
     def get_driver_hosts_map(self, host_ids=None):
