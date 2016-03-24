@@ -31,6 +31,7 @@ define([
         model: null,
         baseUrl: null,
         initialUrl: null,
+        wsPath: '/',
         sortableFields: [],
         autoRefresh: true,
         detailRequiresAdvanced: false,
@@ -138,16 +139,10 @@ define([
 
             if (this.autoRefresh) {
                 var ws_scheme = window.location.protocol == "https:" ? "wss" : "ws";
-                var ws = new ReconnectingWebSocket(ws_scheme + '://' + window.location.host + '/stackdio');
-                ws.onmessage = function (msg) {
+                var ws = new ReconnectingWebSocket(ws_scheme + '://' + window.location.host + this.wsPath);
+                ws.onmessage = function () {
                     self.reload();
                 };
-
-//                this.intervalId = setInterval((function (self) {
-//                    return function() {
-//                        self.reload();
-//                    }
-//                })(this), 3000);
             }
         },
 

@@ -64,7 +64,6 @@ if not os.path.exists(components_dir):
 
 # Grab the current version from our stackdio package
 from stackdio.server import __version__
-VERSION = __version__
 
 # Short and long descriptions for our package
 SHORT_DESCRIPTION = ('A cloud deployment, automation, and orchestration '
@@ -112,7 +111,7 @@ testing_requirements = [
 # of packaging stackdio
 setup(
     name='stackdio-server',
-    version=VERSION,
+    version=__version__,
     url='http://stackd.io',
     author='Digital Reasoning Systems, Inc.',
     author_email='info@stackd.io',

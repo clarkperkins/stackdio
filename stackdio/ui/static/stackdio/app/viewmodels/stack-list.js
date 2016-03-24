@@ -32,6 +32,7 @@ define([
         model: Stack,
         baseUrl: '/stacks/',
         initialUrl: '/api/stacks/',
+        wsPath: '/stacks/',
         sortableFields: [
             {name: 'title', displayName: 'Title', width: '15%'},
             {name: 'description', displayName: 'Description', width: '20%'},

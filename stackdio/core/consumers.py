@@ -17,13 +17,13 @@
 
 import logging
 
-from channels.sessions import channel_session
+from channels.auth import channel_session_user_from_http, channel_session_user
 from channels.channel import Group
 
 logger = logging.getLogger(__name__)
 
 
-@channel_session
+@channel_session_user_from_http
 def ws_connect(message):
     # Just add it to the group
     Group(message['path']).add(message.reply_channel)
@@ -31,12 +31,12 @@ def ws_connect(message):
     message.channel_session['path'] = message['path']
 
 
-@channel_session
+@channel_session_user
 def ws_keepalive(message):
     Group(message.channel_session['path']).add(message.reply_channel)
 
 
-@channel_session
+@channel_session_user
 def ws_disconnect(message):
     # Just remove it from the group
     Group(message.channel_session['path']).discard(message.reply_channel)
