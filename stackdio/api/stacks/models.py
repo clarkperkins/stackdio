@@ -290,8 +290,8 @@ class Stack(TimeStampedModel, TitleSlugDescriptionModel, StatusModel):
                             status_detail=detail, level=level)
 
         # Generate our notifications
-        StackdioGroup('/stacks').send({})
-        StackdioGroup('/stacks/%s' % self.id).send({
+        StackdioGroup('/stacks/').send({})
+        StackdioGroup('/stacks/%s/' % self.id).send({
             'status': status,
         })
 
