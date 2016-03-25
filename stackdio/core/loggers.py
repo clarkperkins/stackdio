@@ -49,4 +49,3 @@ class WebSocketHandler(logging.Handler):
             raise
         except Exception:
             self.handleError(record)
-            raise
