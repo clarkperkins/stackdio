@@ -38,6 +38,8 @@ from django.conf import settings
 from msgpack.exceptions import ExtraData
 from salt.log.setup import LOG_LEVELS
 
+from stackdio.core.loggers import WebSocketHandler
+
 
 logger = logging.getLogger(__name__)
 root_logger = logging.getLogger()
@@ -198,13 +200,14 @@ class StackdioSaltCloudMap(salt.cloud.Map):
 
 class StackdioSaltCloudClient(salt.cloud.CloudClient):
 
-    def launch_map(self, cloud_map, **kwargs):
+    def launch_map(self, stack_id, cloud_map, **kwargs):
         """
         Runs a map from an already in-memory representation rather than an file on disk.
         """
         opts = self._opts_defaults(**kwargs)
 
         handler = setup_logfile_logger(
+            stack_id,
             opts['log_file'],
             opts['log_level_logfile'],
             log_format=opts['log_fmt_logfile'],
@@ -324,17 +327,21 @@ class StackdioSaltCloudClient(salt.cloud.CloudClient):
             return {}
 
 
-def setup_logfile_logger(log_path, log_level=None, log_format=None, date_format=None):
+def setup_logfile_logger(stack_id, log_file, log_level=None, log_format=None, date_format=None):
     """
     Set up logging to a file.
     """
+    log_dir, log_type = os.path.split(log_file)
+
     # Create the handler
-    handler = WatchedFileHandler(log_path)
+    handler = WatchedFileHandler(log_file)
+    ws_handler = WebSocketHandler(stack_id, log_type)
 
     if log_level:
         # Grab and set the level
         level = LOG_LEVELS.get(log_level.lower(), logging.ERROR)
         handler.setLevel(level)
+        ws_handler.setLevel(level)
 
     # Set the default console formatter config
     if not log_format:
@@ -345,6 +352,8 @@ def setup_logfile_logger(log_path, log_level=None, log_format=None, date_format=
     formatter = logging.Formatter(log_format, datefmt=date_format)
 
     handler.setFormatter(formatter)
+    ws_handler.setFormatter(formatter)
+    root_logger.addHandler(handler)
     root_logger.addHandler(handler)
 
     return handler
