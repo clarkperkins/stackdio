@@ -985,7 +985,7 @@ def highstate(stack_id, max_retries=2):
             symlink(log_file, log_symlink)
             symlink(err_file, err_symlink)
 
-            file_log_handler = utils.setup_logfile_logger(stack_id, log_file)
+            file_log_handlers = utils.setup_logfile_logger(stack_id, log_file)
 
             # Remove the other handlers, but save them so we can put them back later
             old_handlers = []
@@ -1013,7 +1013,8 @@ def highstate(stack_id, max_retries=2):
                         result[k] = v['ret']
 
             finally:
-                root_logger.removeHandler(file_log_handler)
+                for handler in file_log_handlers:
+                    root_logger.removeHandler(handler)
                 for handler in old_handlers:
                     root_logger.addHandler(handler)
 
@@ -1143,7 +1144,7 @@ def propagate_ssh(stack_id, max_retries=2):
             symlink(log_file, log_symlink)
             symlink(err_file, err_symlink)
 
-            file_log_handler = utils.setup_logfile_logger(stack_id, log_file)
+            file_log_handlers = utils.setup_logfile_logger(stack_id, log_file)
 
             # Remove the other handlers, but save them so we can put them back later
             old_handlers = []
@@ -1170,7 +1171,8 @@ def propagate_ssh(stack_id, max_retries=2):
                         result[k] = v['ret']
 
             finally:
-                root_logger.removeHandler(file_log_handler)
+                for handler in file_log_handlers:
+                    root_logger.removeHandler(handler)
                 for handler in old_handlers:
                     root_logger.addHandler(handler)
 
@@ -1316,7 +1318,7 @@ def global_orchestrate(stack_id, max_retries=2):
             symlink(err_file, err_symlink)
 
             # Set up logging
-            file_log_handler = utils.setup_logfile_logger(stack_id, log_file)
+            file_log_handlers = utils.setup_logfile_logger(stack_id, log_file)
 
             try:
                 opts = salt.config.client_config(settings.STACKDIO_CONFIG.salt_master_config)
@@ -1337,7 +1339,8 @@ def global_orchestrate(stack_id, max_retries=2):
                                                                         log_file, err_file)
 
             finally:
-                root_logger.removeHandler(file_log_handler)
+                for handler in file_log_handlers:
+                    root_logger.removeHandler(handler)
 
             if failed:
                 if current_try <= max_retries:  # NOQA
@@ -1440,7 +1443,7 @@ def orchestrate(stack_id, max_retries=2):
             symlink(err_file, err_symlink)
 
             # Set up logging
-            file_log_handler = utils.setup_logfile_logger(stack_id, log_file)
+            file_log_handlers = utils.setup_logfile_logger(stack_id, log_file)
 
             try:
                 opts = salt.config.client_config(settings.STACKDIO_CONFIG.salt_master_config)
@@ -1460,7 +1463,8 @@ def orchestrate(stack_id, max_retries=2):
 
             finally:
                 # Stop logging
-                root_logger.removeHandler(file_log_handler)
+                for handler in file_log_handlers:
+                    root_logger.removeHandler(handler)
 
             if failed:
                 if current_try <= max_retries:

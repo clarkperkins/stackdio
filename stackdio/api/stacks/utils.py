@@ -206,7 +206,7 @@ class StackdioSaltCloudClient(salt.cloud.CloudClient):
         """
         opts = self._opts_defaults(**kwargs)
 
-        handler = setup_logfile_logger(
+        handlers = setup_logfile_logger(
             stack_id,
             opts['log_file'],
             opts['log_level_logfile'],
@@ -257,7 +257,8 @@ class StackdioSaltCloudClient(salt.cloud.CloudClient):
                         raise
         finally:
             # Cancel the logging, but make sure it still gets cancelled if an exception is thrown
-            root_logger.removeHandler(handler)
+            for handler in handlers:
+                root_logger.removeHandler(handler)
 
         return salt.utils.cloud.simple_types_filter(ret)
 
@@ -356,7 +357,7 @@ def setup_logfile_logger(stack_id, log_file, log_level=None, log_format=None, da
     root_logger.addHandler(handler)
     root_logger.addHandler(handler)
 
-    return handler
+    return [handler, ws_handler]
 
 
 def state_to_dict(state_string):
