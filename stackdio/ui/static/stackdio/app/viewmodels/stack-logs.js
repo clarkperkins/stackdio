@@ -19,10 +19,11 @@ define([
     'jquery',
     'knockout',
     'bootbox',
+    'websocket',
     'utils/utils',
     'models/stack',
     'fuelux'
-], function ($, ko, bootbox, utils, Stack) {
+], function ($, ko, bootbox, ReconnectingWebSocket, utils, Stack) {
     'use strict';
 
     return function () {
@@ -122,9 +123,28 @@ define([
         $el.on('selected.fu.tree', function (event, data) {
             self.selectedLogUrl = data.target.url;
             clearInterval(self.intervalId);
-            self.reload(true);
             if (data.target.url.indexOf('latest') >= 0) {
-                self.intervalId = setInterval(self.reload, 3000);
+                if (data.target.text.indexOf('error') >= 0) {
+                    self.reload(true);
+                    self.intervalId = setInterval(self.reload, 3000);
+                } else {
+                    self.log('');
+                    var ws_scheme = window.location.protocol == "https:" ? "wss" : "ws";
+                    var ws = new ReconnectingWebSocket(ws_scheme + '://' + window.location.host + '/stacks/' + window.stackdio.stackId + '/logs/' + data.target.text + '/');
+                    var logDiv = document.getElementById('log-text');
+
+                    ws.onmessage = function (msg) {
+                        msg = JSON.parse(msg.data);
+                        var pos = logDiv.scrollTop;
+                        var height = logDiv.scrollHeight;
+                        self.log(self.log() + msg.log_msg + '\n');
+                        if (height - pos < 550) {
+                            logDiv.scrollTop = logDiv.scrollHeight - 498;
+                        }
+                    }
+                }
+            } else {
+                self.reload(true);
             }
         });
 

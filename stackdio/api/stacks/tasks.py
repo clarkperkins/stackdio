@@ -985,7 +985,7 @@ def highstate(stack_id, max_retries=2):
             symlink(log_file, log_symlink)
             symlink(err_file, err_symlink)
 
-            file_log_handlers = utils.setup_logfile_logger(stack_id, log_file)
+            file_log_handlers = utils.setup_logfile_logger(stack_id, 'provisioning', log_file)
 
             # Remove the other handlers, but save them so we can put them back later
             old_handlers = []
@@ -1144,7 +1144,7 @@ def propagate_ssh(stack_id, max_retries=2):
             symlink(log_file, log_symlink)
             symlink(err_file, err_symlink)
 
-            file_log_handlers = utils.setup_logfile_logger(stack_id, log_file)
+            file_log_handlers = utils.setup_logfile_logger(stack_id, 'provisioning', log_file)
 
             # Remove the other handlers, but save them so we can put them back later
             old_handlers = []
@@ -1318,7 +1318,9 @@ def global_orchestrate(stack_id, max_retries=2):
             symlink(err_file, err_symlink)
 
             # Set up logging
-            file_log_handlers = utils.setup_logfile_logger(stack_id, log_file)
+            file_log_handlers = utils.setup_logfile_logger(stack_id,
+                                                           'global_orchestration',
+                                                           log_file)
 
             try:
                 opts = salt.config.client_config(settings.STACKDIO_CONFIG.salt_master_config)
@@ -1443,7 +1445,7 @@ def orchestrate(stack_id, max_retries=2):
             symlink(err_file, err_symlink)
 
             # Set up logging
-            file_log_handlers = utils.setup_logfile_logger(stack_id, log_file)
+            file_log_handlers = utils.setup_logfile_logger(stack_id, 'orchestration', log_file)
 
             try:
                 opts = salt.config.client_config(settings.STACKDIO_CONFIG.salt_master_config)

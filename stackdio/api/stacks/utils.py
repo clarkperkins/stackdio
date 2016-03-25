@@ -208,6 +208,7 @@ class StackdioSaltCloudClient(salt.cloud.CloudClient):
 
         handlers = setup_logfile_logger(
             stack_id,
+            'launch',
             opts['log_file'],
             opts['log_level_logfile'],
             log_format=opts['log_fmt_logfile'],
@@ -328,12 +329,11 @@ class StackdioSaltCloudClient(salt.cloud.CloudClient):
             return {}
 
 
-def setup_logfile_logger(stack_id, log_file, log_level=None, log_format=None, date_format=None):
+def setup_logfile_logger(stack_id, log_type, log_file,
+                         log_level=None, log_format=None, date_format=None):
     """
     Set up logging to a file.
     """
-    log_dir, log_type = os.path.split(log_file)
-
     # Create the handler
     handler = WatchedFileHandler(log_file)
     ws_handler = WebSocketHandler(stack_id, log_type)
@@ -355,7 +355,7 @@ def setup_logfile_logger(stack_id, log_file, log_level=None, log_format=None, da
     handler.setFormatter(formatter)
     ws_handler.setFormatter(formatter)
     root_logger.addHandler(handler)
-    root_logger.addHandler(handler)
+    root_logger.addHandler(ws_handler)
 
     return [handler, ws_handler]
 

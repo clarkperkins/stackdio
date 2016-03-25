@@ -31,7 +31,7 @@ class WebSocketHandler(logging.Handler):
         Initialize the handler.
         """
         logging.Handler.__init__(self)
-        self.group = StackdioGroup('/stacks/%s/logs/%s/' % (stack_id, log_type))
+        self.group = StackdioGroup('/stacks/{}/logs/{}/'.format(stack_id, log_type))
 
     def emit(self, record):
         """
@@ -49,3 +49,4 @@ class WebSocketHandler(logging.Handler):
             raise
         except Exception:
             self.handleError(record)
+            raise
