@@ -19,16 +19,6 @@ import datetime
 import os
 import subprocess
 
-try:
-    from django.utils.lru_cache import lru_cache
-except ImportError:
-    # Sometimes we might not have django yet (like when we're pip installing :))
-
-    def lru_cache():
-        def wrapped_func(func):
-            return func
-        return wrapped_func
-
 VERSION = (0, 8, 0, 'dev', 0)
 
 
@@ -73,7 +63,6 @@ def get_version(version):
 
 
 # Borrowed directly from django
-@lru_cache()
 def get_git_changeset():
     """Returns a numeric identifier of the latest git changeset.
 
@@ -89,7 +78,8 @@ def get_git_changeset():
     try:
         timestamp = datetime.datetime.utcfromtimestamp(int(timestamp))
     except ValueError:
-        return None
+        # If we can't get the timestamp, get the current UTC time
+        timestamp = datetime.datetime.utcnow()
     return timestamp.strftime('%Y%m%d%H%M%S')
 
 

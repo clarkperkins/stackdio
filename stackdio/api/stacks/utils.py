@@ -263,7 +263,7 @@ class StackdioSaltCloudClient(salt.cloud.CloudClient):
 
         return salt.utils.cloud.simple_types_filter(ret)
 
-    def destroy_map(self, cloud_map, **kwargs):
+    def destroy_map(self, cloud_map, hosts, **kwargs):
         """
         Destroy the named VMs
         """
@@ -283,7 +283,7 @@ class StackdioSaltCloudClient(salt.cloud.CloudClient):
                 )
 
             try:
-                ret = self._do_destroy(mapper)
+                ret = self._do_destroy(mapper, hosts)
                 # It worked
                 destroyed = True
             except ExtraData as e:
@@ -308,11 +308,13 @@ class StackdioSaltCloudClient(salt.cloud.CloudClient):
 
         return ret
 
-    def _do_destroy(self, mapper):
+    def _do_destroy(self, mapper, hosts):
         """
         Here's where the destroying actually happens
         """
         dmap = mapper.delete_map()
+
+        hostnames = [host.hostname for host in hosts]
 
         # This is pulled from the salt-cloud ec2 driver code.
         msg = 'The following VMs are set to be destroyed:\n'
@@ -322,8 +324,9 @@ class StackdioSaltCloudClient(salt.cloud.CloudClient):
             for driver, vms in drivers.items():
                 msg += '    {0}:\n'.format(driver)
                 for name in vms:
-                    msg += '      {0}\n'.format(name)
-                    names.add(name)
+                    if name in hostnames:
+                        msg += '      {0}\n'.format(name)
+                        names.add(name)
 
         if names:
             logger.info(msg)

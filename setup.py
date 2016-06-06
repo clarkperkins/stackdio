@@ -29,19 +29,14 @@ major = sys.version_info[0]
 minor = sys.version_info[1]
 micro = sys.version_info[2]
 
-bad_version = False
+supported_versions = [
+    (2, 7),
+    (3, 4),
+]
 
-if major not in (2, 3):
-    bad_version = True
-
-if major == 2 and minor != 7:
-    bad_version = True
-elif major == 3 and minor not in (3, 4):
-    bad_version = True
-
-if bad_version:
+if (major, minor) not in supported_versions:
     err_msg = ('Your Python version {0}.{1}.{2} is not supported.\n'
-               'stackdio-server requires Python 2.7, 3.3, or 3.4.\n'.format(major, minor, micro))
+               'stackdio-server requires Python 2.7 or 3.4.\n'.format(major, minor, micro))
     sys.stderr.write(err_msg)
     sys.exit(1)
 
@@ -79,21 +74,20 @@ requirements = [
     'celery>=3.1',
     'channels>=0.10,<1.0',
     'dj-database-url>=0.3',
-    'Django>=1.8.0,<1.9',
+    'Django>=1.9.0,<1.10',
     'django-auth-ldap>=1.2.7',
-    'django-extensions>=1.5,<1.5.6',
+    'django-extensions>=1.6,<1.7',
     'django-filter>=0.9',
-    'django-guardian>=1.3,<1.4',
+    'django-guardian>=1.4,<1.5',
     'django-model-utils>=2.0,<2.3',
-    'djangorestframework>=3.1,<3.2',
+    'djangorestframework>=3.3,<3.4',
     'envoy>=0.0.2',
     'GitPython>=1.0',
     'Markdown>=2.6',
     'pip>=6',
-    'psutil>=2.1',
     'PyYAML>=3.10',
     'requests>=2.4',
-    'salt>=2015.8.8,<2015.9',
+    'salt>=2016.3.0,<2016.4',
     'six>=1.6',
 ]
 
@@ -125,7 +119,7 @@ setup(
     install_requires=requirements,
     extras_require={
         'mysql': [
-            'MySQL-python==1.2.5',
+            'mysqlclient==1.3.7',
         ],
         'postgresql': [
             'psycopg2==2.6.1'
