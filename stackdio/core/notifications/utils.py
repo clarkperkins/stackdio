@@ -22,27 +22,30 @@ from django.conf import settings
 
 from stackdio.core.config import StackdioConfigException
 from stackdio.core.notifiers import BaseNotifier
+from typing import AnyStr, Dict, List, Type
 
 NotifierConfig = namedtuple('NotifierConfig', ['name', 'class_path', 'options'])
 
 
 # global registry of notifier configs
-notifier_configs = {}
+notifier_configs = {}  # type: Dict[AnyStr, NotifierConfig]
 
 # global registry of notifier classes
-notifier_classes = {}
+notifier_classes = {}  # type: Dict[AnyStr, Type[BaseNotifier]]
 
 # global registry of notifier instances
-notifier_instances = {}
+notifier_instances = {}  # type: Dict[AnyStr, BaseNotifier]
 
 
 def get_notifier_list():
+    # type: () -> List[AnyStr]
     notifier_config = settings.STACKDIO_CONFIG.get('notifiers', {})
 
     return notifier_config.keys()
 
 
 def get_all_notifiers():
+    # type: () -> List[NotifierConfig]
     notifier_list = get_notifier_list()
 
     ret = []
@@ -54,11 +57,9 @@ def get_all_notifiers():
 
 
 def get_notifier_config(name):
+    # type: (AnyStr) -> NotifierConfig
     """
     Get the notifier config object from the notifier name
-    :param name: the name of the notifier defined in the config file
-    :rtype: stackdio.core.notifications.utils.NotifierConfig
-    :return: the config object
     """
     if name not in notifier_configs:
         notifier_config = settings.STACKDIO_CONFIG.get('notifiers', {})
@@ -84,11 +85,9 @@ def get_notifier_config(name):
 
 
 def get_notifier_class(name):
+    # type: (AnyStr) -> Type[BaseNotifier]
     """
     Get the imported notifier class
-    :param name: the notifier name
-    :rtype: abc.ABCMeta
-    :return: the notifier class object
     """
     if name not in notifier_classes:
         notifier_config = get_notifier_config(name)
@@ -111,11 +110,9 @@ def get_notifier_class(name):
 
 
 def get_notifier_instance(name):
+    # type: (AnyStr) -> BaseNotifier
     """
     Get the instance of the given notifier
-    :param name: the notifier name
-    :rtype: BaseNotifier
-    :return: the notifier instance
     """
     # Cache the notifier instance so we have 1 of each type of notifier instance
     if name not in notifier_instances:

@@ -18,6 +18,8 @@
 from abc import ABCMeta, abstractmethod
 
 import six
+from stackdio.core.notifications.models import Notification
+from typing import Any, AnyStr, List, Type
 
 
 NOTIFIER_REQUIRED_METHODS = (
@@ -65,10 +67,12 @@ class BaseNotifier(six.with_metaclass(ABCMeta)):
     split_group_notifications = False
 
     def __init__(self):
+        # type: () -> None
         super(BaseNotifier, self).__init__()
 
     @classmethod
     def __subclasshook__(cls, subclass):
+        # type: (Type) -> bool
         """
         Allow any class that has all the required methods to be considered
         a subclass of BaseNotifier
@@ -80,6 +84,8 @@ class BaseNotifier(six.with_metaclass(ABCMeta)):
 
     @classmethod
     def get_required_options(cls):
+        # type: () -> List[AnyStr]
+
         """
         Override this method to get the required options for your handler instance
         :rtype: list
@@ -88,6 +94,7 @@ class BaseNotifier(six.with_metaclass(ABCMeta)):
         return []
 
     def get_option(self, notification, option):
+        # type: (Notification, AnyStr) -> Any
         """
         Helper method to get an option value and raise an exception if it is required and missing.
         :param notification: the notification object
@@ -103,6 +110,7 @@ class BaseNotifier(six.with_metaclass(ABCMeta)):
 
     @abstractmethod
     def send_notification(self, notification):
+        # type: (Notification) -> Any
         """
         Override this method with logic to send a single notification.  Should return False
         (or something False-y) if the notification fails to send, or True (or something Truth-y)
@@ -114,6 +122,7 @@ class BaseNotifier(six.with_metaclass(ABCMeta)):
         raise NotImplementedError()
 
     def send_notifications_in_bulk(self, notifications):
+        # type: (List[Notification]) -> List[Notification]
         """
         Optionally override this method to send multiple notifications in bulk.
         You probably also want to  set `prefer_send_in_bulk` to True on your class,

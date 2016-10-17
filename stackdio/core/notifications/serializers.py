@@ -27,6 +27,7 @@ from stackdio.core.serializers import (
     StackdioParentHyperlinkedModelSerializer,
 )
 from stackdio.core.utils import recursive_update
+from typing import Any, AnyStr, Dict
 from . import models, utils, validators
 
 logger = logging.getLogger(__name__)
@@ -183,7 +184,7 @@ class GroupSubscriberNotificationChannelSerializer(StackdioParentHyperlinkedMode
         # No validator here
         extra_kwargs = {
             'name': {},
-        }
+        }  # type: Dict[AnyStr, Dict[AnyStr, Any]]
 
     def get_available_channels(self, **kwargs):
         auth_object = self.validated_data['auth_object']

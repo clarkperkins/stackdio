@@ -26,6 +26,7 @@ import six
 import yaml
 from django.utils.crypto import get_random_string
 from jinja2 import Template
+from typing import Any, AnyStr
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +44,12 @@ class StackdioConfigException(Exception):
 class StackdioConfig(dict):
     DOT_DIR_CONFIG_LOCATION = os.path.expanduser('~/.stackdio/stackdio.yaml')
 
-    CONFIG_LOCATIONS = (
-        os.environ.get('STACKDIO_CONFIG_FILE', ''),
+    CONFIG_LOCATIONS = [
+        six.text_type(os.environ.get(b'STACKDIO_CONFIG_FILE', b'')),
         DOT_DIR_CONFIG_LOCATION,
         '/etc/stackdio/stackdio.yaml',
         'config/stackdio.yaml',
-    )
+    ]
 
     REQUIRED_FIELDS = {
         'cloud_providers': list,
@@ -72,12 +73,14 @@ class StackdioConfig(dict):
     }
 
     def __init__(self, home_only=False):
+        # type: (bool) -> None
         super(StackdioConfig, self).__init__()
         self.cfg_file = None
         self.home_only = home_only
         self._load_stackdio_config()
 
     def _load_stackdio_config(self):
+        # type: () -> None
         if self.home_only:
             config_locations = [self.DOT_DIR_CONFIG_LOCATION]
         else:
@@ -149,7 +152,9 @@ class StackdioConfig(dict):
             self.salt_master_log_level = 'info'
 
     def __getattr__(self, k):
+        # type: (AnyStr) -> Any
         return self.get(k)
 
     def __setattr__(self, k, v):
+        # type: (AnyStr, Any) -> None
         self[k] = v
