@@ -15,13 +15,14 @@
 # limitations under the License.
 #
 
+from __future__ import unicode_literals
 
 from django.conf.urls import include, url
-from rest_framework import routers
 
+from stackdio.core import routers
 from . import api
 
-model_router = routers.SimpleRouter()
+model_router = routers.SimpleBulkRouter()
 model_router.register(r'users',
                       api.BlueprintModelUserPermissionsViewSet,
                       'blueprint-model-user-permissions')
@@ -30,7 +31,7 @@ model_router.register(r'groups',
                       'blueprint-model-group-permissions')
 
 
-object_router = routers.SimpleRouter()
+object_router = routers.SimpleBulkRouter()
 object_router.register(r'users',
                        api.BlueprintObjectUserPermissionsViewSet,
                        'blueprint-object-user-permissions')
@@ -59,22 +60,26 @@ urlpatterns = (
         api.BlueprintPropertiesAPIView.as_view(),
         name='blueprint-properties'),
 
-    url(r'^(?P<pk>[0-9]+)/host_definitions/$',
+    url(r'^(?P<parent_pk>[0-9]+)/host_definitions/$',
         api.BlueprintHostDefinitionListAPIView.as_view(),
         name='blueprint-host-definition-list'),
 
-    url(r'^(?P<pk>[0-9]+)/formula_versions/$',
+    url(r'^(?P<parent_pk>[0-9]+)/host_definitions/(?P<pk>[0-9]+)/$',
+        api.BlueprintHostDefinitionDetailAPIView.as_view(),
+        name='blueprint-host-definition-detail'),
+
+    url(r'^(?P<parent_pk>[0-9]+)/formula_versions/$',
         api.BlueprintFormulaVersionsAPIView.as_view(),
         name='blueprint-formula-versions'),
 
-    url(r'^(?P<pk>[0-9]+)/labels/$',
+    url(r'^(?P<parent_pk>[0-9]+)/labels/$',
         api.BlueprintLabelListAPIView.as_view(),
         name='blueprint-label-list'),
 
-    url(r'^(?P<pk>[0-9]+)/labels/(?P<label_name>[\w.@+-]+)/$',
+    url(r'^(?P<parent_pk>[0-9]+)/labels/(?P<label_name>[\w.@+-]+)/$',
         api.BlueprintLabelDetailAPIView.as_view(),
         name='blueprint-label-detail'),
 
-    url(r'^(?P<pk>[0-9]+)/permissions/',
+    url(r'^(?P<parent_pk>[0-9]+)/permissions/',
         include(object_router.urls)),
 )

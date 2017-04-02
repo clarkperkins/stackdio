@@ -15,13 +15,14 @@
 # limitations under the License.
 #
 
+from __future__ import unicode_literals
 
 from django.conf.urls import include, url
-from rest_framework import routers
 
+from stackdio.core import routers
 from . import api
 
-model_router = routers.SimpleRouter()
+model_router = routers.SimpleBulkRouter()
 model_router.register(r'users',
                       api.FormulaModelUserPermissionsViewSet,
                       'formula-model-user-permissions')
@@ -30,7 +31,7 @@ model_router.register(r'groups',
                       'formula-model-group-permissions')
 
 
-object_router = routers.SimpleRouter()
+object_router = routers.SimpleBulkRouter()
 object_router.register(r'users',
                        api.FormulaObjectUserPermissionsViewSet,
                        'formula-object-user-permissions')
@@ -55,18 +56,18 @@ urlpatterns = (
         api.FormulaPropertiesAPIView.as_view(),
         name='formula-properties'),
 
-    url(r'^(?P<pk>[0-9]+)/components/$',
+    url(r'^(?P<parent_pk>[0-9]+)/components/$',
         api.FormulaComponentListAPIView.as_view(),
         name='formula-component-list'),
 
-    url(r'^(?P<pk>[0-9]+)/valid_versions/$',
+    url(r'^(?P<parent_pk>[0-9]+)/valid_versions/$',
         api.FormulaValidVersionListAPIView.as_view(),
         name='formula-valid-version-list'),
 
-    url(r'^(?P<pk>[0-9]+)/action/$',
+    url(r'^(?P<parent_pk>[0-9]+)/action/$',
         api.FormulaActionAPIView.as_view(),
         name='formula-action'),
 
-    url(r'^(?P<pk>[0-9]+)/permissions/',
+    url(r'^(?P<parent_pk>[0-9]+)/permissions/',
         include(object_router.urls)),
 )

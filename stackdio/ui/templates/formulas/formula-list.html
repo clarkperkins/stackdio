@@ -41,14 +41,17 @@
                 </thead>
                 <tbody data-bind="foreach: sortedObjects">
                 <tr class="stackdio-hidden-on-load">
-                    <td data-bind="text: title, click: function (formula) { $root.goToDetailPage(formula) }"></td>
-                    <td data-bind="text: uri, click: function (formula) { $root.goToDetailPage(formula) }"></td>
-                    <td data-bind="click: function (formula) { $root.goToDetailPage(formula) }">
-                        <span class="label" data-bind="css: labelClass, text: status"></span>
+                    <td>
+                        <!-- ko if: $root.canDisplayDetail -->
+                        <a data-bind="text: title, attr: {href: detailUrl, title: title}"></a>
+                        <!-- /ko -->
+                        <!-- ko ifnot: $root.canDisplayDetail -->
+                        <p data-bind="text: title"></p>
+                        <!-- /ko -->
                     </td>
-                    <td data-bind="click: function (formula) { $root.goToDetailPage(formula) }">
-                        <i class="fa fa-lg fa-check text-success" data-bind="visible: privateGitRepo"></i>
-                        <i class="fa fa-lg fa-times text-danger" data-bind="visible: !privateGitRepo()"></i>
+                    <td data-bind="text: uri"></td>
+                    <td>
+                        <span class="label" data-bind="css: labelClass, text: status"></span>
                     </td>
                     <td>
                         <div class="btn-group btn-group-xs action-dropdown"

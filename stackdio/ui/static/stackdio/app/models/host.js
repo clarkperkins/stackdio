@@ -54,9 +54,10 @@ define([
         this.publicDNS = ko.observable();
         this.privateDNS = ko.observable();
         this.hostDefinition = ko.observable();
-        this.status = ko.observable();
-        this.state = ko.observable();
+        this.activity = ko.observable();
+        this.health = ko.observable();
         this.labelClass = ko.observable();
+        this.healthLabelClass = ko.observable();
 
         if (needReload) {
             this.reload();
@@ -70,32 +71,53 @@ define([
     Host.prototype._process = function (raw) {
         this.hostname(raw.hostname);
         this.fqdn(raw.fqdn);
-        this.publicDNS(raw.provider_dns);
+        this.publicDNS(raw.provider_public_dns);
         this.privateDNS(raw.provider_private_dns);
         this.hostDefinition(raw.blueprint_host_definition);
-        this.status(raw.status);
-        this.state(raw.state);
+        this.activity(raw.activity);
+        this.health(raw.health);
 
-        // Determine what type of label should be around the status
-        switch (raw.state) {
-            case 'running':
+        // Determine what type of label should be around the activity
+        switch (raw.activity) {
+            case 'idle':
                 this.labelClass('label-success');
                 break;
-            case 'shutting-down':
-            case 'stopping':
             case 'launching':
-            case 'deleting':
+            case 'provisioning':
+            case 'orchestrating':
+            case 'resuming':
+            case 'pausing':
+            case 'executing':
+            case 'terminating':
                 this.labelClass('label-warning');
                 break;
+            case 'queued':
+            case 'paused':
             case 'terminated':
-            case 'stopped':
-                this.labelClass('label-danger');
-                break;
-            case 'pending':
                 this.labelClass('label-info');
                 break;
+            case 'dead':
+                this.labelClass('label-danger');
+                break;
+            case 'unknown':
             default:
                 this.labelClass('label-default');
+        }
+
+        // Determine what type of label should be around the health
+        switch (raw.health) {
+            case 'healthy':
+                this.healthLabelClass('label-success');
+                break;
+            case 'unstable':
+                this.healthLabelClass('label-warning');
+                break;
+            case 'unhealthy':
+                this.healthLabelClass('label-danger');
+                break;
+            case 'unknown':
+            default:
+                this.healthLabelClass('label-default');
         }
     };
 

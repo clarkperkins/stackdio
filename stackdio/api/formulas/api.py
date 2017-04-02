@@ -15,6 +15,7 @@
 # limitations under the License.
 #
 
+from __future__ import unicode_literals
 
 import logging
 from collections import OrderedDict
@@ -22,10 +23,13 @@ from collections import OrderedDict
 from guardian.shortcuts import assign_perm
 from rest_framework import generics
 from rest_framework.filters import DjangoFilterBackend, DjangoObjectPermissionsFilter
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.serializers import ValidationError
 
 from stackdio.core.permissions import StackdioModelPermissions, StackdioObjectPermissions
+from stackdio.core.serializers import NoOpSerializer
+from stackdio.core.utils import recursively_sort_dict
 from stackdio.core.viewsets import (
     StackdioModelUserPermissionsViewSet,
     StackdioModelGroupPermissionsViewSet,
@@ -33,7 +37,7 @@ from stackdio.core.viewsets import (
     StackdioObjectGroupPermissionsViewSet,
 )
 from stackdio.api.blueprints.models import Blueprint
-from . import permissions, mixins, models, filters, serializers
+from . import mixins, models, filters, serializers
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +46,7 @@ class FormulaListAPIView(generics.ListCreateAPIView):
     """
     Displays a list of all formulas visible to you.
     You may import a formula here also by providing a URI to a git repository containing a valid
-    SPECFILE at the root of the repo.  You may optionally provide a git_username and git_password
-    if your repository requires authentication.
+    SPECFILE at the root of the repo.
     """
     queryset = models.Formula.objects.all()
     serializer_class = serializers.FormulaSerializer
@@ -80,9 +83,37 @@ class FormulaDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
         instance.delete()
 
 
-class FormulaPropertiesAPIView(mixins.FormulaRelatedMixin, generics.RetrieveAPIView):
+class FormulaPropertiesAPIView(generics.RetrieveAPIView):
     queryset = models.Formula.objects.all()
-    serializer_class = serializers.FormulaPropertiesSerializer
+    permission_classes = (StackdioObjectPermissions,)
+
+    def retrieve(self, request, *args, **kwargs):
+        formula = self.get_object()
+
+        # determine if a version was specified
+        version = request.query_params.get('version')
+
+        if version not in formula.get_valid_versions():
+            version = formula.default_version
+
+        properties = formula.properties(version)
+
+        return Response(recursively_sort_dict(properties))
+
+
+class FormulaComponentPaginator(PageNumberPagination):
+
+    def paginate_queryset(self, queryset, request, view=None):
+        # Save the view
+        self.view = view
+        return super(FormulaComponentPaginator, self).paginate_queryset(queryset, request, view)
+
+    def get_paginated_response(self, data):
+        return Response(OrderedDict([
+            ('count', self.page.paginator.count),
+            ('version', self.view.formula_version),
+            ('results', data),
+        ]))
 
 
 class FormulaComponentListAPIView(mixins.FormulaRelatedMixin, generics.ListAPIView):
@@ -90,31 +121,20 @@ class FormulaComponentListAPIView(mixins.FormulaRelatedMixin, generics.ListAPIVi
     Returns a list of formula components available for this formula.  If the `version`
     query parameter is specified, it will show a list for that version.
     """
-    def list(self, request, *args, **kwargs):
+    serializer_class = NoOpSerializer
+    pagination_class = FormulaComponentPaginator
+
+    def get_queryset(self):
         formula = self.get_formula()
 
         # determine if a version was specified
-        version = request.query_params.get('version')
+        version = self.request.query_params.get('version')
 
-        if version in formula.get_valid_versions():
-            components = formula.components_for_version(version)
-        else:
+        if version not in formula.get_valid_versions():
             version = formula.default_version
-            if formula.repo is None:
-                components = {}
-            else:
-                formula.repo.git.checkout(version)
-                components = formula.components
 
-        components = components.values()
-
-        data = OrderedDict((
-            ('count', len(components)),
-            ('version', version),
-            ('results', components),
-        ))
-
-        return Response(data)
+        self.formula_version = version
+        return formula.components(version).values()
 
 
 class FormulaValidVersionListAPIView(mixins.FormulaRelatedMixin, generics.ListAPIView):
@@ -126,9 +146,14 @@ class FormulaValidVersionListAPIView(mixins.FormulaRelatedMixin, generics.ListAP
 
         versions = formula.get_valid_versions()
 
+        version = request.query_params.get('version', '')
+
+        if version:
+            versions = [v for v in versions if version in v]
+
         data = OrderedDict((
             ('count', len(versions)),
-            ('results', versions),
+            ('results', sorted(versions)),
         ))
 
         return Response(data)
@@ -153,20 +178,18 @@ class FormulaActionAPIView(mixins.FormulaRelatedMixin, generics.GenericAPIView):
 
 
 class FormulaModelUserPermissionsViewSet(StackdioModelUserPermissionsViewSet):
-    permission_classes = (permissions.FormulaPermissionsModelPermissions,)
     model_cls = models.Formula
 
 
 class FormulaModelGroupPermissionsViewSet(StackdioModelGroupPermissionsViewSet):
-    permission_classes = (permissions.FormulaPermissionsModelPermissions,)
     model_cls = models.Formula
 
 
-class FormulaObjectUserPermissionsViewSet(mixins.FormulaRelatedMixin,
+class FormulaObjectUserPermissionsViewSet(mixins.FormulaPermissionsMixin,
                                           StackdioObjectUserPermissionsViewSet):
-    permission_classes = (permissions.FormulaPermissionsObjectPermissions,)
+    pass
 
 
-class FormulaObjectGroupPermissionsViewSet(mixins.FormulaRelatedMixin,
+class FormulaObjectGroupPermissionsViewSet(mixins.FormulaPermissionsMixin,
                                            StackdioObjectGroupPermissionsViewSet):
-    permission_classes = (permissions.FormulaPermissionsObjectPermissions,)
+    pass

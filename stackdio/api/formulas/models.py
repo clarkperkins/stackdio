@@ -15,27 +15,30 @@
 # limitations under the License.
 #
 
+from __future__ import unicode_literals
 
 import logging
+import os
 from collections import OrderedDict
-from os.path import exists, join, isdir, split, splitext
 from shutil import rmtree
 
-import git
+import salt.config
+import six
 import yaml
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
-from django.core.cache import cache
 from django.db import models
 from django.dispatch import receiver
 from django_extensions.db.models import TimeStampedModel, TitleSlugDescriptionModel
-from model_utils import Choices
+from model_utils.models import StatusModel
 
-from stackdio.api.stacks.models import StatusDetailModel
+from stackdio.api.formulas import utils
+from stackdio.core.models import SearchQuerySet
 
 logger = logging.getLogger(__name__)
 
 
+@six.python_2_unicode_compatible
 class FormulaVersion(models.Model):
     class Meta:
         default_permissions = ()
@@ -45,6 +48,23 @@ class FormulaVersion(models.Model):
     content_object = GenericForeignKey()
     formula = models.ForeignKey('formulas.Formula')
     version = models.CharField('Formula Version', max_length=100)
+
+    def __str__(self):
+        return six.text_type('{}, version {}'.format(self.formula, self.version))
+
+
+class StatusDetailModel(StatusModel):
+    status_detail = models.TextField(blank=True)
+
+    class Meta:
+        abstract = True
+
+        default_permissions = ()
+
+    def set_status(self, status, detail=''):
+        self.status = status
+        self.status_detail = detail
+        return self.save()
 
 
 _formula_model_permissions = (
@@ -60,29 +80,34 @@ _formula_object_permissions = (
 )
 
 
-class FormulaQuerySet(models.QuerySet):
+class FormulaQuerySet(SearchQuerySet):
     """
     Override create to automatically kick off a celery task to clone the formula repository.
     """
-    def create(self, **kwargs):
-        # Should already be a PasswordStr object from the serializer
-        git_password = kwargs.pop('git_password', '')
+    searchable_fields = ('title', 'description', 'uri')
 
-        kwargs['status'] = Formula.IMPORTING
-        kwargs['status_detail'] = 'Importing formula...this could take a while.'
+    def search(self, query):
+        result = super(FormulaQuerySet, self).search(query)
 
-        formula = super(FormulaQuerySet, self).create(**kwargs)
+        # Find formula component matches
+        formula_ids = []
+        for formula in self.all():
+            for sls_path, component in formula.components(formula.default_version).items():
+                if query.lower() in sls_path.lower():
+                    formula_ids.append(formula.id)
+                elif query.lower() in component['title'].lower():
+                    formula_ids.append(formula.id)
+                elif query.lower() in component['description'].lower():
+                    formula_ids.append(formula.id)
 
-        # Fix circular import issue
-        from . import tasks
+        component_matches = self.filter(id__in=formula_ids)
 
-        # Start up the task to import the formula
-        tasks.import_formula.si(formula.id, git_password).apply_async()
-
-        return formula
+        # Or them together and return
+        return (result or component_matches).distinct()
 
 
-class Formula(TimeStampedModel, TitleSlugDescriptionModel, StatusDetailModel):
+@six.python_2_unicode_compatible
+class Formula(TimeStampedModel, TitleSlugDescriptionModel):
     """
     The intention here is to be able to install an entire formula along
     with identifying the individual components that may be installed
@@ -160,16 +185,8 @@ class Formula(TimeStampedModel, TitleSlugDescriptionModel, StatusDetailModel):
         sls_path: cdh4.hbase.regionserver
 
     """
-    ERROR = 'error'
-    COMPLETE = 'complete'
-    IMPORTING = 'importing'
-    STATUS = Choices(ERROR, COMPLETE, IMPORTING)
-
     model_permissions = _formula_model_permissions
     object_permissions = _formula_object_permissions
-
-    searchable_fields = ('title', 'description', 'uri', 'components__title',
-                         'components__description')
 
     class Meta:
         ordering = ['title']
@@ -184,88 +201,46 @@ class Formula(TimeStampedModel, TitleSlugDescriptionModel, StatusDetailModel):
     # All components in this formula should start with this prefix
     root_path = models.CharField('Root Path', max_length=64)
 
-    git_username = models.CharField('Git Username', max_length=64, blank=True)
+    ssh_private_key = models.TextField('SSH Private Key', blank=True)
 
-    access_token = models.BooleanField('Access Token', default=False)
+    def __str__(self):
+        return six.text_type('{} ({})'.format(self.title, self.uri))
 
-    def __unicode__(self):
-        return '%s (%s)' % (self.title, self.uri)
-
-    def get_repo_dir(self):
-        return join(
+    def get_root_dir(self):
+        root_dir = os.path.join(
             settings.FILE_STORAGE_DIRECTORY,
             'formulas',
-            '{0}-{1}'.format(self.pk, self.get_repo_name())
+            six.text_type(self.pk),
         )
 
-    def get_repo_name(self):
-        return splitext(split(self.uri)[-1])[0]
+        if not os.path.exists(root_dir):
+            os.makedirs(root_dir)
+        return root_dir
 
-    @property
-    def private_git_repo(self):
-        return self.git_username != ''
-
-    @property
-    def repo(self):
-        if not exists(self.get_repo_dir()):
-            return None
-
-        # Cache the repo obj
-        if getattr(self, '_repo', None) is None:
-            self._repo = git.Repo(self.get_repo_dir())
-        return self._repo
+    def get_gitfs(self):
+        return utils.get_gitfs(self.uri, self.ssh_private_key, self)
 
     def get_valid_versions(self):
-        if self.repo is None:
-            return []
-
-        # This will grab all the tags, remote branches, and local branches
-        refs = set()
-        for r in self.repo.refs:
-            if r.is_remote():
-                # This is a remote branch
-                refs.add(str(r.remote_head))
-            else:
-                # local branch
-                refs.add(str(r.name))
-
-        refs.remove('HEAD')
-
-        return list(refs)
+        gitfs = self.get_gitfs()
+        return gitfs.envs()
 
     @property
     def default_version(self):
-        if not self.repo:
-            return None
-        # This will be the name of the default branch.
-        return str(self.repo.remotes.origin.refs.HEAD.ref.remote_head)
+        return 'base'
 
-    def components_for_version(self, version):
-        if self.repo is None:
-            return {}
+    def components(self, version=None):
+        gitfs = self.get_gitfs()
 
-        if version in self.get_valid_versions():
-            # Checkout version, but only if it's valid
-            self.repo.git.checkout(version)
+        version = version or self.default_version
 
-        # Grab the components
-        components = self.components
+        fnd = gitfs.find_file('SPECFILE', tgt_env=version)
 
-        # Go back to HEAD
-        self.repo.git.checkout(self.default_version)
+        if not os.path.exists(fnd['path']):
+            # If the path doesn't exist, update & retry
+            gitfs.update()
+            fnd = gitfs.find_file('SPECFILE', tgt_env=version)
 
-        return components
-
-    @property
-    def components(self):
-        cache_key = 'formula-components-{0}-{1}'.format(self.id, self.repo.head.commit)
-
-        cached_components = cache.get(cache_key)
-
-        if cached_components:
-            return cached_components
-
-        with open(join(self.get_repo_dir(), 'SPECFILE')) as f:
+        with open(fnd['path']) as f:
             yaml_data = yaml.safe_load(f)
             ret = OrderedDict()
             # Create a map of sls_path -> component pairs
@@ -276,37 +251,43 @@ class Formula(TimeStampedModel, TitleSlugDescriptionModel, StatusDetailModel):
                     ('description', component['description']),
                     ('sls_path', component['sls_path']),
                 ))
-            cache.set(cache_key, ret, 10)
             return ret
 
     @classmethod
-    def all_components(cls, versions=()):
-        version_map = {}
-
-        # Build the map of formula -> version
-        for version in versions:
-            version_map[version.formula] = version.version
+    def all_components(cls, version_map=None):
+        version_map = version_map or {}
 
         ret = {}
         for formula in cls.objects.all():
             if formula in version_map:
                 # Use the specified version
-                components = formula.components_for_version(version_map[formula])
+                components = formula.components(version_map[formula])
             else:
                 # Otherwise use the default version
-                components = formula.components_for_version(formula.default_version)
+                components = formula.components(formula.default_version)
 
             for component in components:
                 ret.setdefault(component, []).append(formula)
         return ret
 
-    @property
-    def properties(self):
-        with open(join(self.get_repo_dir(), 'SPECFILE')) as f:
+    def properties(self, version):
+        gitfs = self.get_gitfs()
+
+        version = version or self.default_version
+
+        fnd = gitfs.find_file('SPECFILE', tgt_env=version)
+
+        if not os.path.exists(fnd['path']):
+            # If the path doesn't exist, update & retry
+            gitfs.update()
+            fnd = gitfs.find_file('SPECFILE', tgt_env=version)
+
+        with open(fnd['path']) as f:
             yaml_data = yaml.safe_load(f)
             return yaml_data.get('pillar_defaults', {})
 
 
+@six.python_2_unicode_compatible
 class FormulaComponent(TimeStampedModel):
     """
     An extension of an existing FormulaComponent to add additional metadata
@@ -333,28 +314,46 @@ class FormulaComponent(TimeStampedModel):
     # The order in which the component should be provisioned
     order = models.IntegerField('Order', default=0)
 
-    def __unicode__(self):
-        return u'{0}:{1}'.format(
+    def __str__(self):
+        return six.text_type('{0}:{1}'.format(
             self.sls_path,
             self.content_object,
-        )
+        ))
 
     @property
     def title(self):
         if not hasattr(self, '_full_component'):
-            self._full_component = self.formula.components[self.sls_path]
+            version = self.formula.default_version
+            self._full_component = self.formula.components(version)[self.sls_path]
         return self._full_component['title']
 
     @property
     def description(self):
         if not hasattr(self, '_full_component'):
-            self._full_component = self.formula.components[self.sls_path]
+            version = self.formula.default_version
+            self._full_component = self.formula.components(version)[self.sls_path]
         return self._full_component['description']
+
+    def get_metadata_for_host(self, host):
+        """
+        Get the current status of a given host
+        """
+        return self.metadatas.filter(host=host).order_by('-modified').first()
 
 
 ##
 # Signal events and handlers
 ##
+
+
+@receiver(models.signals.post_save, sender=Formula)
+def formula_post_save(sender, instance, **kwargs):
+    """
+    Utility method to clone the formula once it is saved.  We do this here so that the POST
+    request to create the formula returns immediately, letting the update wait
+    """
+    # Go ahead and update the gitfs
+    instance.get_gitfs().update()
 
 
 @receiver(models.signals.post_delete, sender=Formula)
@@ -364,7 +363,16 @@ def cleanup_formula(sender, instance, **kwargs):
     the formula is deleted.
     """
 
-    repo_dir = instance.get_repo_dir()
-    logger.debug('cleanup_formula called. Path to remove: {0}'.format(repo_dir))
-    if isdir(repo_dir):
-        rmtree(repo_dir)
+    repos_dir = instance.get_root_dir()
+    if os.path.isdir(repos_dir):
+        rmtree(repos_dir)
+
+    opts = salt.config.client_config(settings.STACKDIO_CONFIG.salt_master_config)
+
+    gitfs_cachedir = os.path.join(opts['cachedir'],
+                                  'stackdio',
+                                  'formulas',
+                                  six.text_type(instance.id))
+
+    if os.path.isdir(gitfs_cachedir):
+        rmtree(gitfs_cachedir)

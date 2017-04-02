@@ -20,14 +20,20 @@ import logging
 from django.conf import settings
 from django.contrib.auth.models import Group
 from django.http import Http404
-from django_auth_ldap.backend import LDAPBackend
 from guardian.shortcuts import get_groups_with_perms, get_users_with_perms, remove_perm
 from rest_framework import viewsets
 from rest_framework.serializers import ListField, SlugRelatedField, ValidationError
 
 from stackdio.api.users.models import get_user_queryset
+from stackdio.core.config import StackdioConfigException
+from .permissions import StackdioPermissionsModelPermissions
 from .shortcuts import get_groups_with_model_perms, get_users_with_model_perms
-from . import fields, serializers
+from . import fields, mixins, serializers
+
+try:
+    from django_auth_ldap.backend import LDAPBackend
+except ImportError:
+    LDAPBackend = None
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +53,9 @@ class UserSlugRelatedField(SlugRelatedField):
             return super(UserSlugRelatedField, self).to_internal_value(data)
         except ValidationError:
             if settings.LDAP_ENABLED:
+                if LDAPBackend is None:
+                    raise StackdioConfigException('LDAP is enabled, but django_auth_ldap isn\'t '
+                                                  'installed.  Please install django_auth_ldap')
                 # Grab the ldap user and try again
                 user = LDAPBackend().populate_user(data)
                 if user is not None:
@@ -55,7 +64,7 @@ class UserSlugRelatedField(SlugRelatedField):
             raise
 
 
-class StackdioBasePermissionsViewSet(viewsets.ModelViewSet):
+class StackdioBasePermissionsViewSet(mixins.BulkUpdateModelMixin, viewsets.ModelViewSet):
     """
     Viewset for creating permissions endpoints
     """
@@ -80,6 +89,8 @@ class StackdioBasePermissionsViewSet(viewsets.ModelViewSet):
         super_cls = self.switch_model_object(serializers.StackdioModelPermissionsSerializer,
                                              serializers.StackdioObjectPermissionsSerializer)
 
+        default_parent_lookup_url_kwarg = 'parent_{}'.format(self.parent_lookup_field)
+
         url_field_kwargs = {
             'view_name': 'api:{0}:{1}-{2}-{3}-permissions-detail'.format(
                 app_label,
@@ -90,24 +101,30 @@ class StackdioBasePermissionsViewSet(viewsets.ModelViewSet):
             'permission_lookup_field': self.lookup_field,
             'permission_lookup_url_kwarg': self.lookup_url_kwarg or self.lookup_field,
             'lookup_field': self.parent_lookup_field,
-            'lookup_url_kwarg': self.parent_lookup_url_kwarg or self.parent_lookup_field,
+            'lookup_url_kwarg': self.parent_lookup_url_kwarg or default_parent_lookup_url_kwarg,
         }
 
-        url_field = self.switch_model_object(
-            fields.HyperlinkedModelPermissionsField(**url_field_kwargs),
-            fields.HyperlinkedObjectPermissionsField(**url_field_kwargs),
+        url_field_cls = self.switch_model_object(
+            fields.HyperlinkedModelPermissionsField,
+            fields.HyperlinkedObjectPermissionsField,
         )
 
         # Create a class
         class StackdioUserPermissionsSerializer(super_cls):
             user = UserSlugRelatedField(slug_field='username', queryset=get_user_queryset())
-            url = url_field
+            url = url_field_cls(**url_field_kwargs)
             permissions = ListField()
+
+            class Meta(super_cls.Meta):
+                update_lookup_field = 'user'
 
         class StackdioGroupPermissionsSerializer(super_cls):
             group = SlugRelatedField(slug_field='name', queryset=Group.objects.all())
-            url = url_field
+            url = url_field_cls(**url_field_kwargs)
             permissions = ListField()
+
+            class Meta(super_cls.Meta):
+                update_lookup_field = 'group'
 
         return self.switch_user_group(StackdioUserPermissionsSerializer,
                                       StackdioGroupPermissionsSerializer)
@@ -140,6 +157,7 @@ class StackdioBasePermissionsViewSet(viewsets.ModelViewSet):
 
     def _transform_perm(self, model_name):
         def do_tranform(item):
+            # pylint: disable=unused-variable
             perm, sep, empty = item.partition('_' + model_name)
             return perm
 
@@ -163,6 +181,7 @@ class StackdioBasePermissionsViewSet(viewsets.ModelViewSet):
 class StackdioModelPermissionsViewSet(StackdioBasePermissionsViewSet):
     model_cls = None
     model_or_object = 'model'
+    permission_classes = (StackdioPermissionsModelPermissions,)
 
     def get_model_cls(self):
         assert self.model_cls, (
@@ -186,21 +205,43 @@ class StackdioModelPermissionsViewSet(StackdioBasePermissionsViewSet):
                        'model_permissions',
                        getattr(self, 'model_permissions', ()))
 
+    def get_permissions(self):
+        """
+        Instantiates and returns the list of permissions that this view requires.
+        """
+        ret = []
+        for permission_cls in self.permission_classes:
+            permission = permission_cls()
+
+            # Inject our model_cls into the permission
+            if isinstance(permission, StackdioPermissionsModelPermissions) \
+                    and permission.model_cls is None:
+                permission.model_cls = self.model_cls
+
+            ret.append(permission)
+
+        return ret
+
     def get_queryset(self):  # pylint: disable=method-hidden
         model_cls = self.get_model_cls()
         model_name = model_cls._meta.model_name
         model_perms = self.get_model_permissions()
 
         # Grab the perms for either the users or groups
-        perm_map = self.switch_user_group(
-            get_users_with_model_perms(model_cls, attach_perms=True, with_group_users=False),
-            get_groups_with_model_perms(model_cls, attach_perms=True),
+        perm_map_func = self.switch_user_group(
+            lambda: get_users_with_model_perms(model_cls, attach_perms=True,
+                                               with_group_users=False),
+            lambda: get_groups_with_model_perms(model_cls, attach_perms=True),
         )
+
+        # Do this as a function so we don't fetch both the user AND group permissions on each
+        # request
+        perm_map = perm_map_func()
 
         ret = []
         sorted_perms = sorted(perm_map.items(), key=lambda x: getattr(x[0], self.lookup_field))
         for auth_obj, perms in sorted_perms:
-            new_perms = map(self._transform_perm(model_name), perms)
+            new_perms = [self._transform_perm(model_name)(perm) for perm in perms]
 
             ret.append({
                 self.get_user_or_group(): auth_obj,
@@ -272,16 +313,18 @@ class StackdioObjectPermissionsViewSet(StackdioBasePermissionsViewSet):
         object_perms = self.get_object_permissions()
 
         # Grab the perms for either the users or groups
-        perm_map = self.switch_user_group(
-            get_users_with_perms(obj, attach_perms=True,
-                                 with_superusers=False, with_group_users=False),
-            get_groups_with_perms(obj, attach_perms=True),
+        perm_map_func = self.switch_user_group(
+            lambda: get_users_with_perms(obj, attach_perms=True,
+                                         with_superusers=False, with_group_users=False),
+            lambda: get_groups_with_perms(obj, attach_perms=True),
         )
+
+        perm_map = perm_map_func()
 
         ret = []
         sorted_perms = sorted(perm_map.items(), key=lambda x: getattr(x[0], self.lookup_field))
         for auth_obj, perms in sorted_perms:
-            new_perms = map(self._transform_perm(model_name), perms)
+            new_perms = [self._transform_perm(model_name)(perm) for perm in perms]
 
             ret.append({
                 self.get_user_or_group(): auth_obj,

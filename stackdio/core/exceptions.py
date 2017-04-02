@@ -18,12 +18,15 @@
 
 import logging
 
-
 from django.utils.translation import ugettext_lazy as _
 from rest_framework import status
 from rest_framework.exceptions import APIException
 
 logger = logging.getLogger(__name__)
+
+
+class TaskException(Exception):
+    pass
 
 
 class ResourceConflict(APIException):

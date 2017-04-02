@@ -15,14 +15,17 @@
 # limitations under the License.
 #
 
+from __future__ import unicode_literals
 
 import collections
+from functools import wraps
 
-import six
 from django.conf import settings
 from django.conf.urls import url
 from django.views.decorators.cache import cache_page
 from django.views.decorators.vary import vary_on_cookie
+
+from stackdio.core.exceptions import TaskException
 
 
 class FakeQuerySet(object):
@@ -60,13 +63,44 @@ class FakeQuerySet(object):
         return FakeQuerySet(self.model, ret)
 
 
-class PasswordStr(six.text_type):
+def auto_retry(name=None, max_attempts=3, exception_type=TaskException):
     """
-    Used so that passwords aren't logged in the celery task log
+    Decorator to automatically retry a function a given number of times
+    :param name: the name of the retry function
+    :param max_attempts: the maximum number of attempts to call the function
+    :param exception_type: the type of exception to catch
     """
+    def decorator(func):
 
-    def __repr__(self):
-        return '*' * len(self)
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+
+            current_attempt = 1
+
+            exc = None
+
+            while current_attempt <= max_attempts:
+                # Pass some extra things in
+                kwargs['attempt'] = current_attempt
+                try:
+                    return func(*args, **kwargs)
+                except exception_type as e:
+                    # Save the most recent exception
+                    exc = e
+
+                current_attempt += 1
+
+            if name:
+                msg = 'Max attempts for {} exceeded'.format(name)
+            else:
+                msg = 'Max attempts exceeded'
+
+            # If we exit the loop that means we failed.
+            raise exception_type('{}: {}'.format(msg, exc))
+
+        return wrapper
+
+    return decorator
 
 
 def recursively_sort_dict(d):
@@ -90,12 +124,14 @@ def recursive_update(d, u):
     :return: the merged dict object
     :rtype: dict
     """
-    for k, v in u.items():
-        if isinstance(v, collections.Mapping):
-            r = recursive_update(d.get(k, {}), v)
-            d[k] = r
+    for key, new_val in u.items():
+        old_val = d.get(key, {})
+        if isinstance(new_val, collections.Mapping) and isinstance(old_val, collections.Mapping):
+            # Only make the recursive call if both the old and new values are mappings
+            d[key] = recursive_update(old_val, new_val)
         else:
-            d[k] = u[k]
+            # Otherwise just directly assign the new value
+            d[key] = new_val
     return d
 
 

@@ -61,14 +61,17 @@ define([
 
         // Save the id
         this.id = raw.id;
+        this.detailUrl = '/stacks/' + this.id + '/';
 
         // Editable fields
         this.title = ko.observable();
         this.description = ko.observable();
         this.createUsers = ko.observable();
-        this.status = ko.observable();
+        this.activity = ko.observable();
+        this.health = ko.observable();
         this.hostCount = ko.observable();
         this.labelClass = ko.observable();
+        this.healthLabelClass = ko.observable();
 
         // Non-editable fields
         this.namespace = ko.observable();
@@ -80,6 +83,7 @@ define([
         this.blueprint = ko.observable();
         this.availableActions = ko.observableArray([]);
         this.history = ko.observableArray([]);
+        this.components = ko.observableArray([]);
         this.hosts = ko.observableArray([]);
         this.volumes = ko.observableArray([]);
         this.commands = ko.observableArray([]);
@@ -106,41 +110,58 @@ define([
         provision: 'This will re-run core provisioning, in addition to re-running all of your ' +
                    'custom formula components.  This may overwrite anything you have manually ' +
                    'changed on your hosts.',
-        start: '',
-        stop: '',
+        pause: '',
+        resume: '',
         terminate: 'This will terminate all infrastructure related to this stack.  ' +
                    'You can get it all back by later running the "launch" action on this stack.'
     };
 
-    Stack.prototype._processStatus = function (status) {
-        this.status(status);
-        // Determine what type of label should be around the status
-        switch (status) {
-            case 'finished':
-            case 'ok':
+    Stack.prototype._processActivity = function (activity) {
+        this.activity(activity);
+        // Determine what type of label should be around the activity
+        switch (activity) {
+            case 'idle':
                 this.labelClass('label-success');
                 break;
             case 'launching':
-            case 'configuring':
-            case 'syncing':
             case 'provisioning':
             case 'orchestrating':
-            case 'finalizing':
-            case 'destroying':
-            case 'starting':
-            case 'stopping':
-            case 'executing_action':
+            case 'resuming':
+            case 'pausing':
+            case 'executing':
             case 'terminating':
                 this.labelClass('label-warning');
                 break;
-            case 'pending':
+            case 'queued':
+            case 'paused':
+            case 'terminated':
                 this.labelClass('label-info');
                 break;
-            case 'error':
+            case 'dead':
                 this.labelClass('label-danger');
                 break;
+            case 'unknown':
             default:
                 this.labelClass('label-default');
+        }
+    };
+
+    Stack.prototype._processHealth = function (health) {
+        this.health(health);
+        // Determine what type of label should be around the health
+        switch (health) {
+            case 'healthy':
+                this.healthLabelClass('label-success');
+                break;
+            case 'unstable':
+                this.healthLabelClass('label-warning');
+                break;
+            case 'unhealthy':
+                this.healthLabelClass('label-danger');
+                break;
+            case 'unknown':
+            default:
+                this.healthLabelClass('label-default');
         }
     };
 
@@ -152,7 +173,8 @@ define([
         this.namespace(raw.namespace);
         this.created(moment(raw.created));
         this.labelList(raw.label_list);
-        this._processStatus(raw.status);
+        this._processActivity(raw.activity);
+        this._processHealth(raw.health);
     };
 
     // Reload the current stack
@@ -172,14 +194,15 @@ define([
     };
 
     // Reload the current stack
-    Stack.prototype.refreshStatus = function () {
+    Stack.prototype.refreshActivity = function () {
         var self = this;
         return $.ajax({
             method: 'GET',
             url: self.raw.url
         }).done(function (stack) {
             self.raw = stack;
-            self._processStatus(stack.status);
+            self._processActivity(stack.activity);
+            self._processHealth(stack.health);
         }).fail(function (jqxhr) {
             if (jqxhr.status == 403) {
                 window.location.reload(true);
@@ -312,6 +335,61 @@ define([
         });
     };
 
+    Stack.prototype.runSingleSls = function (component, hostTarget) {
+        var self = this;
+        var stackTitle = _.escape(self.title());
+        bootbox.confirm({
+            title: 'Confirm component run for <strong>' + stackTitle + '</strong>',
+            message: 'Are you sure you want to run ' + component + ' on ' + stackTitle + '?',
+            buttons: {
+                confirm: {
+                    label: 'Run',
+                    className: 'btn-primary'
+                }
+            },
+            callback: function (result) {
+                if (!result) {
+                    return;
+                }
+
+                var arg = {
+                    component: component
+                };
+
+                if (hostTarget) {
+                    arg.host_target = hostTarget;
+                }
+
+                $.ajax({
+                    method: 'POST',
+                    url: self.raw.action,
+                    data: JSON.stringify({
+                        action: 'single-sls',
+                        args: [arg]
+                    })
+                }).done(function () {
+                    if (self.parent && typeof self.parent.reload === 'function') {
+                        self.parent.reload();
+                    }
+                    utils.growlAlert('Triggered ' + component + '.', 'success');
+                }).fail(function (jqxhr) {
+                    var message;
+                    try {
+                        var resp = JSON.parse(jqxhr.responseText);
+                        message = resp.action.join('<br>');
+                    } catch (e) {
+                        message = 'Oops... there was a server error.  This has been ' +
+                            'reported to your administrators.';
+                    }
+                    bootbox.alert({
+                        title: 'Error running component',
+                        message: message
+                    });
+                });
+            }
+        });
+    };
+
     // Peform an action
     Stack.prototype.performAction = function (action) {
         var self = this;
@@ -360,6 +438,85 @@ define([
         });
 
     };
+    
+    Stack.prototype._processStatus = function (obj) {
+        switch (obj.status)
+        {
+            case 'queued':
+                obj.statusPanel = 'panel-info';
+                obj.statusLabel = 'label-info';
+                break;
+
+            case 'running':
+                obj.statusPanel = 'panel-warning';
+                obj.statusLabel = 'label-warning';
+                break;
+
+            case 'succeeded':
+                obj.statusPanel = 'panel-success';
+                obj.statusLabel = 'label-success';
+                break;
+
+            case 'failed':
+                obj.statusPanel = 'panel-danger';
+                obj.statusLabel = 'label-danger';
+                break;
+
+            case 'cancelled':
+            case 'unknown':
+            default:
+                obj.statusPanel = 'panel-default';
+                obj.statusLabel = 'label-default';
+        }
+    };
+    
+    Stack.prototype._processHostHealth = function (obj) {
+        switch (obj.health)
+        {
+            case 'healthy':
+                obj.healthPanel = 'panel-success';
+                obj.healthLabel = 'label-success';
+                break;
+
+            case 'unstable':
+                obj.healthPanel = 'panel-warning';
+                obj.healthLabel = 'label-warning';
+                break;
+
+            case 'unhealthy':
+                obj.healthPanel = 'panel-danger';
+                obj.healthLabel = 'label-danger';
+                break;
+
+            case 'unknown':
+            default:
+                obj.healthPanel = 'panel-default';
+                obj.healthLabel = 'label-default';
+        }
+    };
+
+    Stack.prototype.loadComponents = function () {
+        var self = this;
+        if (!this.raw.hasOwnProperty('components')) {
+            this.raw.components = this.raw.url + 'components/';
+        }
+        return $.ajax({
+            method: 'GET',
+            url: this.raw.components
+        }).done(function (components) {
+            components.results.forEach(function (component) {
+                component.htmlId = component.sls_path.replace(/\./g, '-');
+                component.hosts.forEach(function (host) {
+                    host.timestamp = moment(host.timestamp);
+                    self._processStatus(host);
+                    self._processHostHealth(host);
+                });
+                self._processStatus(component);
+                self._processHostHealth(component);
+            });
+            self.components(components.results);
+        });
+    };
 
     Stack.prototype.loadHistory = function () {
         var self = this;
@@ -372,19 +529,6 @@ define([
         }).done(function (history) {
             history.results.forEach(function (entry) {
                 entry.timestamp = moment(entry.created);
-                switch (entry.level) {
-                    case 'ERROR':
-                        entry.itemClass = 'list-group-item-danger';
-                        break;
-                    case 'WARNING':
-                        entry.itemClass = 'list-group-item-warning';
-                        break;
-                    default:
-                        entry.itemClass = '';
-                }
-                if (entry.status === 'finished') {
-                    entry.itemClass = 'list-group-item-success';
-                }
             });
             self.history(history.results);
         });

@@ -28,7 +28,11 @@ from django.utils.http import urlsafe_base64_encode
 from rest_framework import serializers
 
 from stackdio.core.fields import HyperlinkedField, PasswordField
-from stackdio.core.serializers import StackdioHyperlinkedModelSerializer
+from stackdio.core.notifications.serializers import NotificationChannelSerializer
+from stackdio.core.serializers import (
+    StackdioHyperlinkedModelSerializer,
+    StackdioParentHyperlinkedModelSerializer,
+)
 from . import models, utils
 
 
@@ -65,17 +69,20 @@ class GroupUserSerializer(StackdioHyperlinkedModelSerializer):
 
 class GroupSerializer(StackdioHyperlinkedModelSerializer):
     users = serializers.HyperlinkedIdentityField(
-        view_name='api:users:group-userlist', lookup_field='name')
+        view_name='api:users:group-userlist',
+        lookup_field='name', lookup_url_kwarg='parent_name')
     action = serializers.HyperlinkedIdentityField(
-        view_name='api:users:group-action', lookup_field='name')
+        view_name='api:users:group-action',
+        lookup_field='name', lookup_url_kwarg='parent_name')
+    channels = serializers.HyperlinkedIdentityField(
+        view_name='api:users:group-channel-list',
+        lookup_field='name', lookup_url_kwarg='parent_name')
     user_permissions = serializers.HyperlinkedIdentityField(
         view_name='api:users:group-object-user-permissions-list',
-        lookup_field='name',
-    )
+        lookup_field='name', lookup_url_kwarg='parent_name')
     group_permissions = serializers.HyperlinkedIdentityField(
         view_name='api:users:group-object-group-permissions-list',
-        lookup_field='name',
-    )
+        lookup_field='name', lookup_url_kwarg='parent_name')
 
     class Meta:
         model = Group
@@ -85,6 +92,7 @@ class GroupSerializer(StackdioHyperlinkedModelSerializer):
             'name',
             'users',
             'action',
+            'channels',
             'user_permissions',
             'group_permissions',
         )
@@ -154,10 +162,16 @@ class UserSerializer(StackdioHyperlinkedModelSerializer):
 
     groups = serializers.HyperlinkedIdentityField(
         view_name='api:users:user-grouplist',
-        lookup_field='username'
+        lookup_field='username', lookup_url_kwarg='parent_username',
     )
 
     settings = UserSettingsSerializer()
+
+    channels = HyperlinkedField(view_name='api:users:currentuser-channel-list')
+
+    token = HyperlinkedField(view_name='api:users:currentuser-token')
+
+    reset_token = HyperlinkedField(view_name='api:users:currentuser-token-reset')
 
     change_password = HyperlinkedField(view_name='api:users:currentuser-password')
 
@@ -172,6 +186,9 @@ class UserSerializer(StackdioHyperlinkedModelSerializer):
             'superuser',
             'last_login',
             'groups',
+            'channels',
+            'token',
+            'reset_token',
             'change_password',
             'settings',
         )
@@ -233,17 +250,17 @@ class UserSerializer(StackdioHyperlinkedModelSerializer):
     # We need a custom update since we have a nested field
     def update(self, instance, validated_data):
         # We need to manually pop off settings and update manually
-        settings = validated_data.pop('settings')
+        user_settings = validated_data.pop('settings')
 
-        if settings:
+        if user_settings:
             settings_serializer = self.fields['settings']
-            settings_serializer.update(instance.settings, settings)
+            settings_serializer.update(instance.settings, user_settings)
 
         instance = super(UserSerializer, self).update(instance, validated_data)
 
         # Now we need to put it back, in case something else needs it later.
-        if settings:
-            validated_data['settings'] = settings
+        if user_settings:
+            validated_data['settings'] = user_settings
 
         return instance
 
@@ -320,3 +337,20 @@ class ChangePasswordSerializer(serializers.Serializer):  # pylint: disable=abstr
         self.instance.save()
 
         return self.instance
+
+
+class UserNotificationChannelSerializer(NotificationChannelSerializer):
+
+    class Meta(NotificationChannelSerializer.Meta):
+        app_label = 'users'
+        model_name = 'currentuser-channel'
+
+
+class GroupNotificationChannelSerializer(StackdioParentHyperlinkedModelSerializer,
+                                         NotificationChannelSerializer):
+
+    class Meta(NotificationChannelSerializer.Meta):
+        app_label = 'users'
+        model_name = 'group-channel'
+        parent_attr = 'auth_object'
+        parent_lookup_field = 'name'

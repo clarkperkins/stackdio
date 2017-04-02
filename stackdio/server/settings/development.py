@@ -32,6 +32,8 @@ CACHES = {
     }
 }
 
+DATABASES['default']['CONN_MAX_AGE'] = 0
+
 ##
 # Add in additional applications
 ##

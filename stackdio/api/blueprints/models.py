@@ -15,18 +15,25 @@
 # limitations under the License.
 #
 
+from __future__ import unicode_literals
 
-import json
 import logging
 
-from django.conf import settings
+import six
 from django.contrib.contenttypes.fields import GenericRelation
-from django.core.files.base import ContentFile
-from django.core.files.storage import FileSystemStorage
+from django.contrib.contenttypes.models import ContentType
+from django.core.cache import cache
 from django.db import models
-from django_extensions.db.models import TimeStampedModel, TitleSlugDescriptionModel
-
-from stackdio.core.fields import DeletingFileField
+from django.dispatch import receiver
+from django_extensions.db.models import (
+    TimeStampedModel,
+    TitleDescriptionModel,
+    TitleSlugDescriptionModel,
+)
+from stackdio.core.decorators import django_cache
+from stackdio.core.fields import JSONField
+from stackdio.core.models import SearchQuerySet
+from stackdio.core.notifications.decorators import add_subscribed_channels
 
 PROTOCOL_CHOICES = [
     ('tcp', 'TCP'),
@@ -52,8 +59,8 @@ DEVICE_ID_CHOICES = [
 logger = logging.getLogger(__name__)
 
 
-def get_props_file_path(obj, filename):
-    return 'blueprints/{0}-{1}.props'.format(obj.pk, obj.slug)
+class BlueprintQuerySet(SearchQuerySet):
+    searchable_fields = ('title', 'description')
 
 
 _blueprint_model_permissions = (
@@ -69,6 +76,8 @@ _blueprint_object_permissions = (
 )
 
 
+@add_subscribed_channels
+@six.python_2_unicode_compatible
 class Blueprint(TimeStampedModel, TitleSlugDescriptionModel):
     """
     Blueprints are a template of reusable configuration used to launch
@@ -80,7 +89,6 @@ class Blueprint(TimeStampedModel, TitleSlugDescriptionModel):
     """
     model_permissions = _blueprint_model_permissions
     object_permissions = _blueprint_object_permissions
-    searchable_fields = ('title', 'description')
 
     class Meta:
         ordering = ('title',)
@@ -93,38 +101,25 @@ class Blueprint(TimeStampedModel, TitleSlugDescriptionModel):
 
     create_users = models.BooleanField('Create SSH Users')
 
-    # storage for properties file
-    props_file = DeletingFileField(
-        max_length=255,
-        upload_to=get_props_file_path,
-        null=True,
-        blank=True,
-        default=None,
-        storage=FileSystemStorage(location=settings.FILE_STORAGE_DIRECTORY))
+    # The properties for this blueprint
+    properties = JSONField('Properties')
 
-    def __unicode__(self):
-        return u'{0} (id={1})'.format(self.title, self.id)
+    objects = BlueprintQuerySet.as_manager()
+
+    def __str__(self):
+        return six.text_type('{0} (id={1})'.format(self.title, self.id))
 
     @property
     def host_definition_count(self):
         return self.host_definitions.count()
 
-    def _get_properties(self):
-        if not self.props_file:
-            return {}
-        with open(self.props_file.path) as f:
-            return json.loads(f.read())
+    @django_cache('{ctype}-{id}-label-list')
+    def get_cached_label_list(self):
+        return self.labels.all()
 
-    def _set_properties(self, props):
-        props_json = json.dumps(props, indent=4)
-        if not self.props_file:
-            self.props_file.save(self.slug + '.props', ContentFile(props_json))
-        else:
-            with open(self.props_file.path, 'w') as f:
-                f.write(props_json)
-
-    # Create a property
-    properties = property(_get_properties, _set_properties)
+    @django_cache('blueprint-{id}-stack-count')
+    def stack_count(self):
+        return self.stacks.count()
 
     def get_formulas(self):
         formulas = set()
@@ -135,7 +130,8 @@ class Blueprint(TimeStampedModel, TitleSlugDescriptionModel):
         return list(formulas)
 
 
-class BlueprintHostDefinition(TitleSlugDescriptionModel, TimeStampedModel):
+@six.python_2_unicode_compatible
+class BlueprintHostDefinition(TimeStampedModel, TitleDescriptionModel):
 
     class Meta:
         verbose_name_plural = 'host definitions'
@@ -179,6 +175,9 @@ class BlueprintHostDefinition(TitleSlugDescriptionModel, TimeStampedModel):
                                      blank=True,
                                      null=True)
 
+    # Any extra options we need to pass on to the host
+    extra_options = JSONField('Extra Options')
+
     # Grab the list of formula components
     formula_components = GenericRelation('formulas.FormulaComponent')
 
@@ -186,11 +185,12 @@ class BlueprintHostDefinition(TitleSlugDescriptionModel, TimeStampedModel):
     def formula_components_count(self):
         return self.formula_components.count()
 
-    def __unicode__(self):
-        return self.title
+    def __str__(self):
+        return six.text_type(self.title)
 
 
-class BlueprintAccessRule(TitleSlugDescriptionModel, TimeStampedModel):
+@six.python_2_unicode_compatible
+class BlueprintAccessRule(TimeStampedModel):
     """
     Access rules are a white list of rules for a host that defines
     what protocols and ports are available for the corresponding
@@ -217,21 +217,22 @@ class BlueprintAccessRule(TitleSlugDescriptionModel, TimeStampedModel):
     to_port = models.IntegerField('End Port')
 
     # Rule is a string specifying the CIDR for what network has access
-    # to the given protocl and ports. For AWS, you may also specify
+    # to the given protocol and ports. For AWS, you may also specify
     # a rule of the form "owner_id:security_group", that will authorize
     # access to the given security group owned by the owner_id's account
     rule = models.CharField('Rule', max_length=255)
 
-    def __unicode__(self):
-        return u'{0} {1}-{2} {3}'.format(
+    def __str__(self):
+        return six.text_type('{0} {1}-{2} {3}'.format(
             self.protocol,
             self.from_port,
             self.to_port,
             self.rule
-        )
+        ))
 
 
-class BlueprintVolume(TitleSlugDescriptionModel, TimeStampedModel):
+@six.python_2_unicode_compatible
+class BlueprintVolume(TimeStampedModel):
 
     class Meta:
         verbose_name_plural = 'volumes'
@@ -239,8 +240,7 @@ class BlueprintVolume(TitleSlugDescriptionModel, TimeStampedModel):
         default_permissions = ()
 
     # The host definition this access rule applies to
-    host = models.ForeignKey('blueprints.BlueprintHostDefinition',
-                             related_name='volumes')
+    host = models.ForeignKey('blueprints.BlueprintHostDefinition', related_name='volumes')
 
     # The device that the volume should be attached to when a stack is created
     device = models.CharField('Device Name', max_length=32, choices=DEVICE_ID_CHOICES)
@@ -248,9 +248,33 @@ class BlueprintVolume(TitleSlugDescriptionModel, TimeStampedModel):
     # Where the volume will be mounted after created and attached
     mount_point = models.CharField('Mount Point', max_length=64)
 
-    # The snapshot ID to create the volume from
-    snapshot = models.ForeignKey('cloud.Snapshot',
-                                 related_name='blueprint_volumes')
+    # The snapshot ID to create the volume from - allow this to be null so we can create
+    # empty volumes without a snapshot
+    snapshot = models.ForeignKey('cloud.Snapshot', related_name='blueprint_volumes',
+                                 null=True, default=None)
 
-    def __unicode__(self):
-        return u'BlueprintVolume: {0}'.format(self.pk)
+    # The size of the volume to create - also allow this to be null if we're using a snapshot
+    size_in_gb = models.IntegerField('Size in GB', null=True, default=None)
+
+    # Should this volume be encrypted?
+    encrypted = models.BooleanField('Encrypted', default=False)
+
+    # Any extra options we need about the volume to be created (i.e. the encryption key)
+    extra_options = JSONField('Extra Options')
+
+    def __str__(self):
+        return six.text_type('{} mounted at {}'.format(self.device, self.mount_point))
+
+
+@receiver(models.signals.post_delete, sender=Blueprint)
+def blueprint_post_delete(sender, **kwargs):
+    blueprint = kwargs.pop('instance')
+
+    ctype = ContentType.objects.get_for_model(Blueprint)
+
+    # Delete from the cache
+    cache_keys = [
+        'blueprint-{}-stack-count'.format(blueprint.id),
+        '{}-{}-label-list'.format(ctype.pk, blueprint.id),
+    ]
+    cache.delete_many(cache_keys)

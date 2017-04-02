@@ -3,28 +3,7 @@
 from __future__ import unicode_literals
 
 import django.db.models.deletion
-import django_extensions.db.fields
 from django.db import migrations, models
-
-
-def forwards_func(apps, schema_editor):
-    Volume = apps.get_model('volumes', 'Volume')
-
-    # Get the blueprint volume from the host def
-    for volume in Volume.objects.all():
-        for blueprint_volume in volume.host.blueprint_host_definition.volumes.all():
-            if blueprint_volume.snapshot == volume.snapshot:
-                volume.blueprint_volume = blueprint_volume
-                volume.save()
-
-
-def reverse_func(apps, schema_editor):
-    Volume = apps.get_model('volumes', 'Volume')
-
-    # Just put the snapshot back in place
-    for volume in Volume.objects.all():
-        volume.snapshot = volume.blueprint_volume.snapshot
-        volume.save()
 
 
 class Migration(migrations.Migration):
@@ -39,37 +18,31 @@ class Migration(migrations.Migration):
             model_name='volume',
             name='stack',
         ),
+        # They are null at first, but we don't allow them to be null later after the values are populated
         migrations.AddField(
             model_name='volume',
             name='blueprint_volume',
             field=models.ForeignKey(null=True, on_delete=django.db.models.deletion.CASCADE, related_name='volumes', to='blueprints.BlueprintVolume'),
         ),
-        # Populate the blueprint_volumes
-        migrations.RunPython(forwards_func, reverse_func),
-        # Make them non-nullable
+        # Allow some other fields to be null for a bit (only matters for reverse)
         migrations.AlterField(
-            model_name='volume',
-            name='blueprint_volume',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='volumes', to='blueprints.BlueprintVolume'),
-        ),
-        # delete snapshot
-        migrations.RemoveField(
             model_name='volume',
             name='snapshot',
+            field=models.ForeignKey(to='cloud.Snapshot', null=True),
         ),
         migrations.AlterField(
             model_name='volume',
-            name='host',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='volumes', to='stacks.Host'),
+            name='device',
+            field=models.CharField(max_length=32, verbose_name='Device', null=True),
         ),
         migrations.AlterField(
             model_name='volume',
-            name='created',
-            field=django_extensions.db.fields.CreationDateTimeField(auto_now_add=True, verbose_name='created'),
+            name='hostname',
+            field=models.CharField(max_length=64, verbose_name='Hostname', null=True),
         ),
         migrations.AlterField(
             model_name='volume',
-            name='modified',
-            field=django_extensions.db.fields.ModificationDateTimeField(auto_now=True, verbose_name='modified'),
+            name='mount_point',
+            field=models.CharField(max_length=255, verbose_name='Mount Point', null=True),
         ),
     ]

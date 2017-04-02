@@ -15,8 +15,11 @@
 # limitations under the License.
 #
 
+from __future__ import unicode_literals
+
 import logging
 
+import six
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import models
@@ -26,9 +29,10 @@ logger = logging.getLogger(__name__)
 
 
 def get_user_queryset():
-    return get_user_model().objects.exclude(id=settings.ANONYMOUS_USER_ID)
+    return get_user_model().objects.all()
 
 
+@six.python_2_unicode_compatible
 class UserSettings(models.Model):
 
     class Meta:
@@ -44,8 +48,8 @@ class UserSettings(models.Model):
     # Is the advanced view on?
     advanced_view = models.BooleanField('Advanced View', default=False)
 
-    def __unicode__(self):
-        return self.user.username
+    def __str__(self):
+        return six.text_type('Settings for {}'.format(self.user.username))
 
 
 @receiver(models.signals.post_save, sender=settings.AUTH_USER_MODEL)
@@ -54,8 +58,12 @@ def user_post_save(sender, **kwargs):
     Catch the post_save signal for all User objects and create a
     UserSettings objects if needed
     """
+    if kwargs.get('raw'):
+        # Don't do this on loaddata
+        return
+
     user = kwargs.pop('instance')
     created = kwargs.pop('created', False)
 
-    if created and user.id != settings.ANONYMOUS_USER_ID:
+    if created:
         UserSettings.objects.create(user=user)

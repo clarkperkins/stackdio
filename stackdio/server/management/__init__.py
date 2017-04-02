@@ -26,19 +26,8 @@
 import argparse
 import sys
 
+from stackdio.server.management import commands
 from stackdio.server.version import __version__
-from . import commands
-
-if sys.stdout.isatty():
-    import readline  # NOQA
-
-SALT_COMMANDS = (
-    'salt',
-    'salt-master',
-    'salt-run',
-    'salt-cloud',
-    'salt-key',
-)
 
 
 def main():
@@ -60,6 +49,11 @@ def main():
         description='Initializes the required stackdio configuration file.')
     init_parser.set_defaults(command=commands.InitCommand)
     init_parser.set_defaults(raw_args=False)
+    init_parser.add_argument('--no-prompt',
+                             default=False,
+                             action='store_true',
+                             help='Use the current config file values to re-write '
+                                  'the salt config files.  The current config file is not changed.')
 
     # Dumps the configuration of various things
     config_parser = subparsers.add_parser(
@@ -70,28 +64,26 @@ def main():
                                default='stackdio',
                                help=('The type of configuration to dump. '
                                      'Valid choices: stackdio, nginx, '
-                                     'apache, supervisord. Default is '
-                                     'stackdio.'))
+                                     'supervisord. Default is stackdio.'))
     config_parser.add_argument('--with-ssl',
                                default=False,
                                action='store_true',
-                               help=('Toggles SSL for apache and nginx '
-                                     'configuration.'))
+                               help='Toggles SSL for nginx configuration.')
     config_parser.add_argument('--exclude-gunicorn',
                                dest='with_gunicorn',
                                default=True,
                                action='store_false',
-                               help=('Excludes gunicorn from supervisord.'))
+                               help='Excludes gunicorn from supervisord.')
     config_parser.add_argument('--exclude-celery',
                                dest='with_celery',
                                default=True,
                                action='store_false',
-                               help=('Excludes celery from supervisord.'))
+                               help='Excludes celery from supervisord.')
     config_parser.add_argument('--exclude-salt-master',
                                dest='with_salt_master',
                                default=True,
                                action='store_false',
-                               help=('Excludes salt-master from supervisord.'))
+                               help='Excludes salt-master from supervisord.')
     config_parser.set_defaults(command=commands.ConfigCommand)
     config_parser.set_defaults(raw_args=False)
 
@@ -112,14 +104,14 @@ def main():
     # Runs the development Django server for stackdio API/UI
     managepy_parser = subparsers.add_parser(
         'manage.py',
-        help='convenience wrapper for Django\' manage.py command',
+        help='convenience wrapper for Django\'s manage.py command',
         add_help=False)
     managepy_parser.set_defaults(command=commands.DjangoManageWrapperCommand)
     managepy_parser.set_defaults(raw_args=True)
 
     # Expose salt-specific commands that we'll wrap and execute with
     # the appropriate arguments
-    for wrapper in SALT_COMMANDS:
+    for wrapper in commands.SaltWrapperCommand.COMMANDS:
         wrapper_parser = subparsers.add_parser(
             wrapper,
             add_help=False,
@@ -128,7 +120,7 @@ def main():
         wrapper_parser.set_defaults(raw_args=True)
 
     # parse args
-    args, unknown_args = parser.parse_known_args()
+    args, unknown_args = parser.parse_known_args()  # pylint: disable=unused-variable
     if args.raw_args:
         args.command(sys.argv[1:])()
     else:

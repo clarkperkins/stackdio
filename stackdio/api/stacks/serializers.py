@@ -15,76 +15,85 @@
 # limitations under the License.
 #
 
+from __future__ import unicode_literals
 
 import logging
 import os
 import string
 from collections import OrderedDict
 
+import actstream
 import salt.cloud
-import six
+from celery import chain
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.db import transaction
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
-
 from stackdio.api.blueprints.models import Blueprint, BlueprintHostDefinition
 from stackdio.api.blueprints.serializers import BlueprintHostDefinitionSerializer
 from stackdio.api.cloud.models import SecurityGroup
 from stackdio.api.cloud.serializers import SecurityGroupSerializer
 from stackdio.api.formulas.serializers import FormulaComponentSerializer, FormulaVersionSerializer
+from stackdio.core.constants import Action, Activity, ComponentStatus, Health
+from stackdio.core.fields import HyperlinkedParentField
 from stackdio.core.mixins import CreateOnlyFieldsMixin
 from stackdio.core.serializers import (
+    PropertiesField,
     StackdioHyperlinkedModelSerializer,
+    StackdioParentHyperlinkedModelSerializer,
     StackdioLabelSerializer,
     StackdioLiteralLabelsSerializer,
 )
-from stackdio.core.utils import recursive_update, recursively_sort_dict
-from stackdio.core.validators import PropertiesValidator, validate_hostname
-from . import models, tasks, utils, workflows
+from stackdio.core.validators import validate_hostname
+
+from . import models, tasks, utils, validators, workflows
 
 logger = logging.getLogger(__name__)
 
 
-class StackPropertiesSerializer(serializers.Serializer):  # pylint: disable=abstract-method
-    def to_representation(self, obj):
-        ret = {}
-        if obj is not None:
-            # Make it work two different ways.. ooooh
-            if isinstance(obj, models.Stack):
-                ret = obj.properties
-            else:
-                ret = obj
-        return recursively_sort_dict(ret)
+class HostComponentSerializer(FormulaComponentSerializer):
+    status = serializers.SerializerMethodField()
+    health = serializers.SerializerMethodField()
+    timestamp = serializers.SerializerMethodField()
 
-    def to_internal_value(self, data):
-        return data
+    def _get_metadata(self, obj):
+        if not hasattr(self, '_metadata'):
+            self._metadata = obj.get_metadata_for_host(self.parent.parent.host)
+        return self._metadata
 
-    def validate(self, attrs):
-        PropertiesValidator().validate(attrs)
-        return attrs
+    def get_status(self, obj):
+        # This relies on the parent serializer setting the host attribute
+        # (see to_representation() in the HostSerializer class)
+        meta = self._get_metadata(obj)
+        return meta.status if meta else ComponentStatus.UNKNOWN
 
-    def update(self, stack, validated_data):
-        if self.partial:
-            # This is a PATCH, so properly merge in the old data
-            old_properties = stack.properties
-            stack.properties = recursive_update(old_properties, validated_data)
-        else:
-            # This is a PUT, so just add the data directly
-            stack.properties = validated_data
+    def get_health(self, obj):
+        meta = self._get_metadata(obj)
+        return meta.health if meta else Health.UNKNOWN
 
-        # Be sure to save the instance
-        stack.save()
+    def get_timestamp(self, obj):
+        meta = self._get_metadata(obj)
+        return meta.modified if meta else None
 
-        return stack
+    class Meta(FormulaComponentSerializer.Meta):
+        fields = (
+            'formula',
+            'title',
+            'description',
+            'sls_path',
+            'order',
+            'status',
+            'health',
+            'timestamp',
+        )
 
 
-class HostSerializer(StackdioHyperlinkedModelSerializer):
+class HostSerializer(StackdioParentHyperlinkedModelSerializer):
     # Read only fields
     availability_zone = serializers.PrimaryKeyRelatedField(read_only=True)
     blueprint_host_definition = serializers.ReadOnlyField(source='blueprint_host_definition.title')
-    formula_components = FormulaComponentSerializer(many=True, read_only=True)
+    formula_components = HostComponentSerializer(many=True, read_only=True)
 
     # Fields for adding / removing hosts
     available_actions = ('add', 'remove')
@@ -95,20 +104,22 @@ class HostSerializer(StackdioHyperlinkedModelSerializer):
     )
     count = serializers.IntegerField(write_only=True, min_value=1)
     backfill = serializers.BooleanField(default=False, write_only=True)
+    extra_options = serializers.JSONField(read_only=True)
 
     class Meta:
         model = models.Host
+        parent_attr = 'stack'
+        model_name = 'stack-host'
         fields = (
             'url',
             'hostname',
-            'provider_dns',
+            'fqdn',
+            'provider_public_dns',
+            'provider_public_ip',
             'provider_private_dns',
             'provider_private_ip',
-            'fqdn',
-            'state',
-            'state_reason',
-            'status',
-            'status_detail',
+            'health',
+            'activity',
             'availability_zone',
             'subnet_id',
             'created',
@@ -120,26 +131,28 @@ class HostSerializer(StackdioHyperlinkedModelSerializer):
             'host_definition',
             'count',
             'backfill',
+            'extra_options',
         )
 
         read_only_fields = (
             'hostname',
-            'provider_dns',
+            'provider_public_dns',
+            'provider_public_ip',
             'provider_private_dns',
             'provider_private_ip',
             'fqdn',
-            'state',
-            'state_reason',
-            'status',
-            'status_detail',
+            'health',
+            'activity',
             'subnet_id',
             'sir_id',
             'sir_price',
+            'extra_options',
         )
 
     def __init__(self, *args, **kwargs):
         super(HostSerializer, self).__init__(*args, **kwargs)
         self.create_object = False
+        self.host = None
 
     def get_fields(self):
         """
@@ -164,7 +177,11 @@ class HostSerializer(StackdioHyperlinkedModelSerializer):
                 ('results', serializer.to_representation(instance)),
             ))
         else:
-            return super(HostSerializer, self).to_representation(instance)
+            # Temporarily set the host attribute on this serializer so the children can pick it up
+            self.host = instance
+            ret = super(HostSerializer, self).to_representation(instance)
+            self.host = None
+            return ret
 
     def validate(self, attrs):
         stack = self.context['stack']
@@ -185,10 +202,10 @@ class HostSerializer(StackdioHyperlinkedModelSerializer):
                 errors.setdefault('count', []).append(err_msg)
 
         # Make sure the stack is in a valid state
-        if stack.status != models.Stack.FINISHED:
+        if stack.activity != Activity.IDLE:
             err_msg = 'You may not add hosts to the stack in its current state: {0}'
             raise serializers.ValidationError({
-                'stack': [err_msg.format(stack.status)]
+                'stack': [err_msg.format(stack.activity)]
             })
 
         # Make sure that the host definition belongs to the proper blueprint
@@ -235,8 +252,7 @@ class HostSerializer(StackdioHyperlinkedModelSerializer):
         host_ids = [h.id for h in hosts]
         if host_ids:
             models.Host.objects.filter(id__in=host_ids).update(
-                state=models.Host.DELETING,
-                state_reason='User initiated delete.'
+                activity=Activity.TERMINATING,
             )
 
             # Start the celery task chain to kill the hosts
@@ -258,73 +274,99 @@ class HostSerializer(StackdioHyperlinkedModelSerializer):
         return action_map[action](stack, validated_data)
 
 
+class ComponentMetadataSerializer(serializers.ModelSerializer):
+
+    host = serializers.CharField(source='host.hostname')
+    timestamp = serializers.DateTimeField(source='modified')
+
+    class Meta:
+        model = models.ComponentMetadata
+
+        fields = (
+            'host',
+            'status',
+            'health',
+            'timestamp',
+        )
+
+
+class StackComponentSerializer(serializers.Serializer):
+
+    formula = serializers.CharField(source='component.formula.uri')
+    title = serializers.CharField(source='component.title')
+    description = serializers.CharField(source='component.description')
+    sls_path = serializers.CharField(source='component.sls_path')
+    order = serializers.IntegerField(source='component.order')
+    status = serializers.CharField()
+    health = serializers.CharField()
+    hosts = ComponentMetadataSerializer(many=True, source='metadatas')
+
+    def create(self, validated_data):
+        raise NotImplementedError('Cannot create components.')
+
+    def update(self, instance, validated_data):
+        raise NotImplementedError('Cannot update components.')
+
+
 class StackHistorySerializer(StackdioHyperlinkedModelSerializer):
     class Meta:
         model = models.StackHistory
         fields = (
-            'event',
-            'status',
-            'status_detail',
-            'level',
-            'created'
+            'message',
+            'created',
         )
-
-
-class StackCreateUserDefault(object):
-    """
-    Used to set the default value of create_users to be that of the blueprint
-    """
-    def __init__(self):
-        super(StackCreateUserDefault, self).__init__()
-        self._context = None
-
-    def set_context(self, field):
-        self._context = field.parent
-
-    def __call__(self):
-        blueprint_id = self._context.initial_data.get('blueprint', None)
-        if blueprint_id is None:
-            return None
-        if not isinstance(blueprint_id, six.integer_types):
-            return None
-        try:
-            blueprint = Blueprint.objects.get(pk=blueprint_id)
-            return blueprint.create_users
-        except Blueprint.DoesNotExist:
-            return None
 
 
 class StackSerializer(CreateOnlyFieldsMixin, StackdioHyperlinkedModelSerializer):
     # Read only fields
-    host_count = serializers.ReadOnlyField(source='hosts.count')
-    volume_count = serializers.ReadOnlyField(source='volumes.count')
-    label_list = StackdioLiteralLabelsSerializer(read_only=True, many=True, source='labels')
+    label_list = StackdioLiteralLabelsSerializer(read_only=True, many=True,
+                                                 source='get_cached_label_list')
 
     # Identity links
-    hosts = serializers.HyperlinkedIdentityField(
-        view_name='api:stacks:stack-hosts')
-    action = serializers.HyperlinkedIdentityField(
-        view_name='api:stacks:stack-action')
-    commands = serializers.HyperlinkedIdentityField(
-        view_name='api:stacks:stack-command-list')
-    logs = serializers.HyperlinkedIdentityField(
-        view_name='api:stacks:stack-logs')
-    volumes = serializers.HyperlinkedIdentityField(
-        view_name='api:stacks:stack-volumes')
-    labels = serializers.HyperlinkedIdentityField(
-        view_name='api:stacks:stack-label-list')
     properties = serializers.HyperlinkedIdentityField(
         view_name='api:stacks:stack-properties')
+    hosts = serializers.HyperlinkedIdentityField(
+        view_name='api:stacks:stack-host-list',
+        lookup_url_kwarg='parent_pk')
+    action = serializers.HyperlinkedIdentityField(
+        view_name='api:stacks:stack-action',
+        lookup_url_kwarg='parent_pk')
+    commands = serializers.HyperlinkedIdentityField(
+        view_name='api:stacks:stack-command-list',
+        lookup_url_kwarg='parent_pk')
+    logs = serializers.HyperlinkedIdentityField(
+        view_name='api:stacks:stack-logs',
+        lookup_url_kwarg='parent_pk')
+    components = serializers.HyperlinkedIdentityField(
+        view_name='api:stacks:stack-component-list',
+        lookup_url_kwarg='parent_pk')
+    volumes = serializers.HyperlinkedIdentityField(
+        view_name='api:stacks:stack-volume-list',
+        lookup_url_kwarg='parent_pk')
+    labels = serializers.HyperlinkedIdentityField(
+        view_name='api:stacks:stack-label-list',
+        lookup_url_kwarg='parent_pk')
     history = serializers.HyperlinkedIdentityField(
-        view_name='api:stacks:stack-history')
+        view_name='api:stacks:stack-history',
+        lookup_url_kwarg='parent_pk')
     security_groups = serializers.HyperlinkedIdentityField(
-        view_name='api:stacks:stack-security-groups')
+        view_name='api:stacks:stack-security-groups',
+        lookup_url_kwarg='parent_pk')
     formula_versions = serializers.HyperlinkedIdentityField(
-        view_name='api:stacks:stack-formula-versions')
+        view_name='api:stacks:stack-formula-versions',
+        lookup_url_kwarg='parent_pk')
+    user_channels = serializers.HyperlinkedIdentityField(
+        view_name='api:stacks:stack-user-channel-list',
+        lookup_url_kwarg='parent_pk')
+    group_channels = serializers.HyperlinkedIdentityField(
+        view_name='api:stacks:stack-group-channel-list',
+        lookup_url_kwarg='parent_pk')
     user_permissions = serializers.HyperlinkedIdentityField(
-        view_name='api:stacks:stack-object-user-permissions-list')
+        view_name='api:stacks:stack-object-user-permissions-list',
+        lookup_url_kwarg='parent_pk')
     group_permissions = serializers.HyperlinkedIdentityField(
-        view_name='api:stacks:stack-object-group-permissions-list')
+        view_name='api:stacks:stack-object-group-permissions-list',
+        lookup_url_kwarg='parent_pk')
 
     class Meta:
         model = models.Stack
@@ -334,16 +376,16 @@ class StackSerializer(CreateOnlyFieldsMixin, StackdioHyperlinkedModelSerializer)
             'blueprint',
             'title',
             'description',
-            'status',
+            'activity',
+            'health',
             'namespace',
             'create_users',
             'host_count',
             'volume_count',
             'created',
             'label_list',
-            'user_permissions',
-            'group_permissions',
             'hosts',
+            'components',
             'volumes',
             'labels',
             'properties',
@@ -353,6 +395,10 @@ class StackSerializer(CreateOnlyFieldsMixin, StackdioHyperlinkedModelSerializer)
             'security_groups',
             'formula_versions',
             'logs',
+            'user_channels',
+            'group_channels',
+            'user_permissions',
+            'group_permissions',
         )
 
         create_only_fields = (
@@ -361,11 +407,12 @@ class StackSerializer(CreateOnlyFieldsMixin, StackdioHyperlinkedModelSerializer)
         )
 
         read_only_fields = (
-            'status',
+            'activity',
+            'health',
         )
 
         extra_kwargs = {
-            'create_users': {'default': serializers.CreateOnlyDefault(StackCreateUserDefault())},
+            'create_users': {'required': False},
             'blueprint': {'view_name': 'api:blueprints:blueprint-detail'},
         }
 
@@ -375,10 +422,17 @@ class StackSerializer(CreateOnlyFieldsMixin, StackdioHyperlinkedModelSerializer)
         # make sure the user has a public key or they won't be able to SSH
         # later
         request = self.context['request']
+
+        blueprint = self.instance.blueprint if self.instance else attrs['blueprint']
         if 'create_users' in attrs:
             create_users = attrs['create_users']
         else:
-            create_users = self.instance.create_users
+            if self.instance:
+                create_users = self.instance.create_users
+            else:
+                attrs['create_users'] = blueprint.create_users
+                create_users = attrs['create_users']
+
         if create_users and not request.user.settings.public_key:
             errors.setdefault('public_key', []).append(
                 'You have not added a public key to your user '
@@ -389,7 +443,6 @@ class StackSerializer(CreateOnlyFieldsMixin, StackdioHyperlinkedModelSerializer)
 
         # Check to see if the launching user has permission to launch from the blueprint
         user = request.user
-        blueprint = self.instance.blueprint if self.instance else attrs['blueprint']
 
         if not user.has_perm('blueprints.view_blueprint', blueprint):
             err_msg = 'You do not have permission to launch a stack from this blueprint.'
@@ -402,10 +455,8 @@ class StackSerializer(CreateOnlyFieldsMixin, StackdioHyperlinkedModelSerializer)
             accounts.add(host_definition.cloud_image.account)
 
         for account in accounts:
-            if (
-                not account.create_security_groups and
-                account.security_groups.filter(is_default=True).count() < 1
-            ):
+            if (not account.create_security_groups and
+                    account.security_groups.filter(is_default=True).count() < 1):
                 errors.setdefault('security_groups', []).append(
                     'Account `{0}` has per-stack security groups disabled, but doesn\'t define any '
                     'default security groups.  You must define at least 1 default security group '
@@ -473,15 +524,9 @@ class StackSerializer(CreateOnlyFieldsMixin, StackdioHyperlinkedModelSerializer)
 
 
 class FullStackSerializer(StackSerializer):
-    properties = StackPropertiesSerializer(required=False)
+    properties = PropertiesField(required=False)
     blueprint = serializers.PrimaryKeyRelatedField(queryset=Blueprint.objects.all())
     formula_versions = FormulaVersionSerializer(many=True, required=False)
-
-    def to_representation(self, instance):
-        """
-        We want to return links instead of the full object
-        """
-        return StackSerializer(instance, context=self.context).to_representation(instance)
 
     def create(self, validated_data):
         formula_versions = validated_data.pop('formula_versions', [])
@@ -503,6 +548,10 @@ class FullStackSerializer(StackSerializer):
         workflow.execute()
 
         return stack
+
+    def to_representation(self, instance):
+        super_serializer = StackSerializer(instance, context=self.context)
+        return super_serializer.to_representation(instance)
 
 
 class StackLabelSerializer(StackdioLabelSerializer):
@@ -531,8 +580,14 @@ class StackLabelSerializer(StackdioLabelSerializer):
         if label.content_type == stack_ctype:
             logger.info('Tagging infrastructure...')
 
-            # Spin up the task to tag everything
-            tasks.tag_infrastructure.si(label.object_id, None, False).apply_async()
+            # Spin up the task to tag everything - we need to update the metadata first though.
+            task_chain = chain(
+                tasks.update_metadata.si(label.object_id),
+                tasks.tag_infrastructure.si(label.object_id),
+            )
+
+            # Start it up
+            task_chain.apply_async()
 
         return label
 
@@ -576,84 +631,52 @@ class StackActionSerializer(serializers.Serializer):  # pylint: disable=abstract
         action = attrs['action']
         request = self.context['request']
 
-        if stack.status not in models.Stack.SAFE_STATES:
-            raise serializers.ValidationError({
-                'action': ['You may not perform an action while the stack is in its current state.']
-            })
-
-        driver_hosts_map = stack.get_driver_hosts_map()
-        total_host_count = len(stack.get_hosts().exclude(instance_id=''))
-
-        available_actions = set()
-
-        # check the individual provider for available actions
-        for driver in driver_hosts_map:
-            host_available_actions = driver.get_available_actions()
-            if action not in host_available_actions:
-                err_msg = ('At least one of the hosts in this stack does not support '
-                           'the requested action.')
-                raise serializers.ValidationError({
-                    'action': [err_msg]
-                })
-            available_actions.update(host_available_actions)
-
-        if action not in available_actions:
+        if action not in Action.ALL:
             raise serializers.ValidationError({
                 'action': ['{0} is not a valid action.'.format(action)]
             })
 
+        if action not in Activity.action_map.get(stack.activity, []):
+            err_msg = 'You may not perform the {0} action while the stack is {1}.'
+            raise serializers.ValidationError({
+                'action': [err_msg.format(action, stack.activity)]
+            })
+
+        total_host_count = len(stack.get_hosts().exclude(instance_id=''))
+
         # Check to make sure the user is authorized to execute the action
-        if action not in utils.filter_actions(request.user, stack, available_actions):
+        if action not in utils.filter_actions(request.user, stack, Action.ALL):
             raise PermissionDenied(
                 'You are not authorized to run the "{0}" action on this stack'.format(action)
             )
 
         # All actions other than launch require hosts to be available
-        if action != 'launch' and total_host_count == 0:
+        if action != Action.LAUNCH and total_host_count == 0:
             err_msg = ('The submitted action requires the stack to have available hosts. '
                        'Perhaps you meant to run the launch action instead.')
             raise serializers.ValidationError({
                 'action': [err_msg]
             })
 
-        # Make sure the action is executable on all hosts
-        for driver, hosts in driver_hosts_map.items():
-            # check the action against current states (e.g., starting can't
-            # happen unless the hosts are in the stopped state.)
-            # XXX: Assuming that host metadata is accurate here
-            for host in hosts:
-                start_stop_msg = ('{0} action requires all hosts to be in the {1} '
-                                  'state first. At least one host is reporting an invalid '
-                                  'state: {2}')
+        single_sls_errors = []
 
-                if action == driver.ACTION_START and host.state != driver.STATE_STOPPED:
-                    raise serializers.ValidationError({
-                        'action': [start_stop_msg.format('Start', driver.STATE_STOPPED, host.state)]
-                    })
-                if action == driver.ACTION_STOP and host.state != driver.STATE_RUNNING:
-                    raise serializers.ValidationError({
-                        'action': [start_stop_msg.format('Stop', driver.STATE_RUNNING, host.state)]
-                    })
-                if action == driver.ACTION_TERMINATE and host.state not in (driver.STATE_RUNNING,
-                                                                            driver.STATE_STOPPED):
-                    raise serializers.ValidationError({
-                        'action': [start_stop_msg.format('Terminate',
-                                                         'running or stopped',
-                                                         host.state)]
-                    })
+        if action == Action.SINGLE_SLS:
+            args = attrs.get('args', [])
+            for arg in args:
+                if 'component' not in arg:
+                    single_sls_errors.append('arg is missing a component')
+                component = arg['component']
 
-                require_running = (
-                    driver.ACTION_PROVISION,
-                    driver.ACTION_ORCHESTRATE
-                )
+                # This can raise a ValidationError
+                try:
+                    validators.can_run_component_on_stack(component, stack)
+                except serializers.ValidationError as e:
+                    single_sls_errors.append(e.detail)
 
-                if action in require_running and host.state != driver.STATE_RUNNING:
-                    err_msg = ('Provisioning actions require all hosts to be in the '
-                               'running state first. At least one host is reporting '
-                               'an invalid state: {0}'.format(host.state))
-                    raise serializers.ValidationError({
-                        'action': [err_msg]
-                    })
+        if single_sls_errors:
+            raise serializers.ValidationError({
+                'args': single_sls_errors,
+            })
 
         return attrs
 
@@ -668,10 +691,10 @@ class StackActionSerializer(serializers.Serializer):  # pylint: disable=abstract
         stack = self.instance
         action = self.validated_data['action']
         args = self.validated_data.get('args', [])
+        request = self.context['request']
 
-        stack.set_status(models.Stack.EXECUTING_ACTION,
-                         models.Stack.EXECUTING_ACTION,
-                         'Stack is executing action \'{0}\''.format(action))
+        stack.set_activity(Activity.QUEUED)
+        actstream.action.send(request.user, verb='executed {0}'.format(action), target=stack)
 
         # Utilize our workflow to run the action
         workflow = workflows.ActionWorkflow(stack, action, args)
@@ -680,11 +703,13 @@ class StackActionSerializer(serializers.Serializer):  # pylint: disable=abstract
         return self.instance
 
 
-class StackCommandSerializer(StackdioHyperlinkedModelSerializer):
-    zip_url = serializers.HyperlinkedIdentityField(view_name='api:stacks:stackcommand-zip')
+class StackCommandSerializer(StackdioParentHyperlinkedModelSerializer):
+    zip_url = HyperlinkedParentField(view_name='api:stacks:stack-command-zip', parent_attr='stack')
 
     class Meta:
         model = models.StackCommand
+        parent_attr = 'stack'
+        model_name = 'stack-command'
         fields = (
             'id',
             'url',

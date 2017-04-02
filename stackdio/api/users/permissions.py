@@ -15,18 +15,11 @@
 # limitations under the License.
 #
 
-from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Group
-
 from stackdio.core.permissions import (
     StackdioObjectPermissions,
-    StackdioPermissionsModelPermissions,
-    StackdioPermissionsObjectPermissions,
+    StackdioParentPermissions,
+    StackdioPermissionsPermissions,
 )
-
-
-class UserPermissionsModelPermissions(StackdioPermissionsModelPermissions):
-    model_cls = get_user_model()
 
 
 class GroupObjectPermissions(StackdioObjectPermissions):
@@ -44,9 +37,21 @@ class GroupObjectPermissions(StackdioObjectPermissions):
     }
 
 
-class GroupPermissionsModelPermissions(StackdioPermissionsModelPermissions):
-    model_cls = Group
+class GroupParentPermissions(StackdioParentPermissions):
+
+    base_required_perms = []
+
+    perms_map = {
+        'GET': [],
+        'OPTIONS': [],
+        'HEAD': [],
+        'POST': ['%(app_label)s.update_%(model_name)s'],
+        'PUT': ['%(app_label)s.update_%(model_name)s'],
+        'PATCH': ['%(app_label)s.update_%(model_name)s'],
+        'DELETE': ['%(app_label)s.update_%(model_name)s'],
+    }
 
 
-class GroupPermissionsObjectPermissions(StackdioPermissionsObjectPermissions):
-    parent_model_cls = Group
+class GroupPermissionsPermissions(StackdioPermissionsPermissions):
+
+    base_required_perms = []

@@ -20,9 +20,8 @@ define([
     'jquery',
     'knockout',
     'bootbox',
-    'utils/utils',
-    'models/host-definition'
-], function ($, ko, bootbox, utils, HostDefinition) {
+    'utils/utils'
+], function ($, ko, bootbox, utils) {
     'use strict';
 
     // Define the snapshot model.
@@ -48,13 +47,13 @@ define([
 
         // Save the id
         this.id = raw.id;
+        this.detailUrl = '/snapshots/' + this.id + '/';
 
         // Editable fields
         this.title = ko.observable();
         this.description = ko.observable();
         this.accountId = ko.observable();
         this.snapshotId = ko.observable();
-        this.sizeInGB = ko.observable();
         this.filesystemType = ko.observable();
 
         if (needReload) {
@@ -71,7 +70,6 @@ define([
         this.description(raw.description);
         this.accountId(raw.account);
         this.snapshotId(raw.snapshot_id);
-        this.sizeInGB(raw.size_in_gb);
         this.filesystemType(raw.filesystem_type);
     };
 
@@ -89,7 +87,7 @@ define([
 
     Snapshot.prototype.save = function () {
         var self = this;
-        var keys = ['title', 'description', 'snapshot_id', 'size_in_gb', 'filesystem_type'];
+        var keys = ['title', 'description', 'snapshot_id', 'filesystem_type'];
 
         keys.forEach(function (key) {
             var el = $('#' + key);
@@ -105,7 +103,6 @@ define([
                 title: self.title(),
                 description: self.description(),
                 snapshot_id: self.snapshotId(),
-                size_in_gb: self.sizeInGB(),
                 filesystem_type: self.filesystemType()
             })
         }).done(function (snapshot) {

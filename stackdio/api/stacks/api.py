@@ -17,12 +17,14 @@
 
 
 import logging
+import os
 import zipfile
 from collections import OrderedDict
-from os import listdir
-from os.path import join, isfile
 
 import envoy
+from actstream import action
+from django.contrib.auth.models import Group
+from django.contrib.contenttypes.models import ContentType
 from guardian.shortcuts import assign_perm
 from rest_framework import generics, status
 from rest_framework.filters import DjangoFilterBackend, DjangoObjectPermissionsFilter
@@ -31,20 +33,25 @@ from rest_framework.reverse import reverse
 from rest_framework.serializers import ValidationError
 from six import StringIO
 
-from stackdio.core.models import Label
+from stackdio.api.cloud.filters import SecurityGroupFilter
+from stackdio.api.formulas.models import FormulaVersion
+from stackdio.api.formulas.serializers import FormulaVersionSerializer
+from stackdio.api.volumes.serializers import VolumeSerializer
+from stackdio.core.constants import Activity
+from stackdio.core.notifications.serializers import (
+    UserSubscriberNotificationChannelSerializer,
+    GroupSubscriberNotificationChannelSerializer,
+)
 from stackdio.core.permissions import StackdioModelPermissions, StackdioObjectPermissions
 from stackdio.core.renderers import PlainTextRenderer, ZipRenderer
+from stackdio.core.serializers import ObjectPropertiesSerializer
 from stackdio.core.viewsets import (
     StackdioModelUserPermissionsViewSet,
     StackdioModelGroupPermissionsViewSet,
     StackdioObjectUserPermissionsViewSet,
     StackdioObjectGroupPermissionsViewSet,
 )
-from stackdio.api.cloud.filters import SecurityGroupFilter
-from stackdio.api.formulas.models import FormulaVersion
-from stackdio.api.formulas.serializers import FormulaVersionSerializer
-from stackdio.api.volumes.serializers import VolumeSerializer
-from . import filters, mixins, models, permissions, serializers, utils, workflows
+from . import filters, mixins, models, serializers, utils, workflows
 
 logger = logging.getLogger(__name__)
 
@@ -102,8 +109,8 @@ class StackDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
     def perform_destroy(self, instance):
         stack = instance
 
-        # Check the status
-        if stack.status not in models.Stack.SAFE_STATES:
+        # Check the activity
+        if stack.activity not in Activity.can_delete:
             err_msg = ('You may not delete this stack in its current state.  Please wait until '
                        'it is finished with the current action.')
             raise ValidationError({
@@ -111,38 +118,18 @@ class StackDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
             })
 
         # Update the status
-        msg = 'Stack will be removed upon successful termination of all machines'
-        stack.set_status(models.Stack.DESTROYING,
-                         models.Stack.DESTROYING, msg)
+        stack.set_activity(Activity.QUEUED)
+        action.send(self.request.user, verb='deleted', action_object=instance)
 
         # Execute the workflow to delete the infrastructure
         workflow = workflows.DestroyStackWorkflow(stack, opts=self.request.data)
         workflow.execute()
 
 
-class StackModelUserPermissionsViewSet(StackdioModelUserPermissionsViewSet):
-    permission_classes = (permissions.StackPermissionsModelPermissions,)
-    model_cls = models.Stack
-
-
-class StackModelGroupPermissionsViewSet(StackdioModelGroupPermissionsViewSet):
-    permission_classes = (permissions.StackPermissionsModelPermissions,)
-    model_cls = models.Stack
-
-
-class StackPropertiesAPIView(mixins.StackRelatedMixin, generics.RetrieveUpdateAPIView):
+class StackPropertiesAPIView(generics.RetrieveUpdateAPIView):
     queryset = models.Stack.objects.all()
-    serializer_class = serializers.StackPropertiesSerializer
-
-
-class StackObjectUserPermissionsViewSet(mixins.StackRelatedMixin,
-                                        StackdioObjectUserPermissionsViewSet):
-    permission_classes = (permissions.StackPermissionsObjectPermissions,)
-
-
-class StackObjectGroupPermissionsViewSet(mixins.StackRelatedMixin,
-                                         StackdioObjectGroupPermissionsViewSet):
-    permission_classes = (permissions.StackPermissionsObjectPermissions,)
+    serializer_class = ObjectPropertiesSerializer
+    permission_classes = (StackdioObjectPermissions,)
 
 
 class StackHistoryAPIView(mixins.StackRelatedMixin, generics.ListAPIView):
@@ -155,15 +142,13 @@ class StackHistoryAPIView(mixins.StackRelatedMixin, generics.ListAPIView):
 
 class StackActionAPIView(mixins.StackRelatedMixin, generics.GenericAPIView):
     serializer_class = serializers.StackActionSerializer
-    permission_classes = (permissions.StackActionObjectPermissions,)
 
     def get(self, request, *args, **kwargs):
         stack = self.get_stack()
-        driver_hosts_map = stack.get_driver_hosts_map()
-        available_actions = set()
-        for driver, hosts in driver_hosts_map.items():
-            available_actions.update(driver.get_available_actions())
+        # Grab the list of available actions for the current stack activity
+        available_actions = Activity.action_map.get(stack.activity, [])
 
+        # Filter them based on permissions
         available_actions = utils.filter_actions(request.user, stack, available_actions)
 
         return Response({
@@ -189,33 +174,26 @@ class StackCommandListAPIView(mixins.StackRelatedMixin, generics.ListCreateAPIVi
 
     def get_queryset(self):
         stack = self.get_stack()
-        return models.StackCommand.objects.filter(stack=stack)
+        return stack.commands.all()
 
     def perform_create(self, serializer):
         serializer.save(stack=self.get_stack())
 
 
-class StackCommandDetailAPIView(generics.RetrieveDestroyAPIView):
-    queryset = models.StackCommand.objects.all()
+class StackCommandDetailAPIView(mixins.StackRelatedMixin, generics.RetrieveDestroyAPIView):
     serializer_class = serializers.StackCommandSerializer
-    permission_classes = (permissions.StackParentObjectPermissions,)
 
-    def get_stack(self):
-        return self.get_object().stack
-
-    def check_object_permissions(self, request, obj):
-        # Check the permissions on the stack instead of the host
-        super(StackCommandDetailAPIView, self).check_object_permissions(request, obj.stack)
+    def get_queryset(self):
+        stack = self.get_stack()
+        return stack.commands.all()
 
 
-class StackCommandZipAPIView(generics.GenericAPIView):
-    queryset = models.StackCommand.objects.all()
-    permission_classes = (permissions.StackParentObjectPermissions,)
+class StackCommandZipAPIView(mixins.StackRelatedMixin, generics.GenericAPIView):
     renderer_classes = (ZipRenderer,)
 
-    def check_object_permissions(self, request, obj):
-        # Check the permissions on the stack instead of the host
-        super(StackCommandZipAPIView, self).check_object_permissions(request, obj.stack)
+    def get_queryset(self):
+        stack = self.get_stack()
+        return stack.commands.all()
 
     def get(self, request, *args, **kwargs):
         command = self.get_object()
@@ -261,39 +239,58 @@ class StackLabelListAPIView(mixins.StackRelatedMixin, generics.ListCreateAPIView
 
 
 class StackLabelDetailAPIView(mixins.StackRelatedMixin, generics.RetrieveUpdateDestroyAPIView):
-    queryset = Label.objects.all()
     serializer_class = serializers.StackLabelSerializer
+    lookup_field = 'key'
+    lookup_url_kwarg = 'label_name'
 
-    def get_object(self):
-        queryset = self.filter_queryset(self.get_queryset())
-
-        # Lookup with both object ids
-        filter_kwargs = {
-            'object_id': self.kwargs['pk'],
-            'key': self.kwargs['label_name']
-        }
-        obj = generics.get_object_or_404(queryset, **filter_kwargs)
-
-        # May raise a permission denied
-        self.check_object_permissions(self.request, obj)
-
-        return obj
+    def get_queryset(self):
+        stack = self.get_stack()
+        return stack.labels.all()
 
     def get_serializer_context(self):
         context = super(StackLabelDetailAPIView, self).get_serializer_context()
         context['content_object'] = self.get_stack()
         return context
 
-    def check_object_permissions(self, request, obj):
-        check_perms = super(StackLabelDetailAPIView, self).check_object_permissions
-        if isinstance(obj, models.Stack):
-            check_perms(request, obj)
-        else:
-            # Check the permissions on the stack instead of the label
-            check_perms(request, obj.content_object)
+
+class StackComponentListAPIView(mixins.StackRelatedMixin, generics.ListAPIView):
+    serializer_class = serializers.StackComponentSerializer
+
+    def get_queryset(self):
+        stack = self.get_stack()
+        return stack.get_components()
 
 
-class StackHostsAPIView(mixins.StackRelatedMixin, generics.ListCreateAPIView):
+class StackUserChannelsListAPIView(mixins.StackRelatedMixin, generics.ListCreateAPIView):
+    serializer_class = UserSubscriberNotificationChannelSerializer
+
+    def get_queryset(self):
+        stack = self.get_stack()
+        return stack.subscribed_channels.filter(auth_object=self.request.user)
+
+    def get_serializer_context(self):
+        context = super(StackUserChannelsListAPIView, self).get_serializer_context()
+        context['auth_object'] = self.request.user
+        return context
+
+    def perform_create(self, serializer):
+        serializer.save(auth_object=self.request.user, subscribed_object=self.get_stack())
+
+
+class StackGroupChannelsListAPIView(mixins.StackRelatedMixin, generics.ListCreateAPIView):
+    serializer_class = GroupSubscriberNotificationChannelSerializer
+
+    def get_queryset(self):
+        stack = self.get_stack()
+        group_ctype = ContentType.objects.get_for_model(Group)
+        # We want all the subscribed channels that are associated with groups
+        return stack.subscribed_channels.filter(auth_object_content_type=group_ctype)
+
+    def perform_create(self, serializer):
+        serializer.save(subscribed_object=self.get_stack())
+
+
+class StackHostListAPIView(mixins.StackRelatedMixin, generics.ListCreateAPIView):
     """
     Lists all hosts for the associated stack.
 
@@ -342,23 +339,17 @@ class StackHostsAPIView(mixins.StackRelatedMixin, generics.ListCreateAPIView):
         """
         We need the stack during serializer validation - so we'll throw it in the context
         """
-        context = super(StackHostsAPIView, self).get_serializer_context()
-        # No need to check perms - that happens in get_queryset
-        context['stack'] = self.get_stack(check_permissions=False)
+        context = super(StackHostListAPIView, self).get_serializer_context()
+        context['stack'] = self.get_stack()
         return context
 
 
-class HostDetailAPIView(generics.RetrieveDestroyAPIView):
-    queryset = models.Host.objects.all()
+class StackHostDetailAPIView(mixins.StackRelatedMixin, generics.RetrieveDestroyAPIView):
     serializer_class = serializers.HostSerializer
-    permission_classes = (permissions.StackParentObjectPermissions,)
 
-    def get_stack(self):
-        return self.get_object().stack
-
-    def check_object_permissions(self, request, obj):
-        # Check the permissions on the stack instead of the host
-        super(HostDetailAPIView, self).check_object_permissions(request, obj.stack)
+    def get_queryset(self):
+        stack = self.get_stack()
+        return stack.hosts.all()
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -370,13 +361,14 @@ class HostDetailAPIView(generics.RetrieveDestroyAPIView):
     def perform_destroy(self, instance):
         stack = instance.stack
 
-        if stack.status != models.Stack.FINISHED:
+        if stack.activity not in Activity.can_delete:
             err_msg = 'You may not delete hosts on this stack in its current state: {0}'
             raise ValidationError({
-                'stack': [err_msg.format(stack.status)]
+                'stack': [err_msg.format(stack.activity)]
             })
 
-        instance.set_status(models.Host.DELETING, 'Deleting host.')
+        instance.set_activity(Activity.QUEUED)
+        action.send(self.request.user, verb='deleted', action_object=instance)
 
         host_ids = [instance.id]
 
@@ -384,7 +376,7 @@ class HostDetailAPIView(generics.RetrieveDestroyAPIView):
         workflows.DestroyHostsWorkflow(stack, host_ids).execute()
 
 
-class StackVolumesAPIView(mixins.StackRelatedMixin, generics.ListAPIView):
+class StackVolumeListAPIView(mixins.StackRelatedMixin, generics.ListAPIView):
     serializer_class = VolumeSerializer
 
     def get_queryset(self):
@@ -418,18 +410,18 @@ class StackLogsAPIView(mixins.StackRelatedMixin, generics.GenericAPIView):
             else:
                 log_file = '%s.log.latest' % log_type
 
-            if isfile(join(root_dir, log_file)):
+            if os.path.isfile(os.path.join(root_dir, log_file)):
                 latest[log_type] = reverse(
                     'api:stacks:stack-logs-detail',
-                    kwargs={'pk': stack.pk, 'log': log_file},
+                    kwargs={'parent_pk': stack.pk, 'log': log_file},
                     request=request,
                 )
 
         historical = [
             reverse('api:stacks:stack-logs-detail',
-                    kwargs={'pk': stack.pk, 'log': log},
+                    kwargs={'parent_pk': stack.pk, 'log': log},
                     request=request)
-            for log in sorted(listdir(log_dir))
+            for log in sorted(os.listdir(log_dir))
         ]
 
         ret = OrderedDict((
@@ -443,8 +435,7 @@ class StackLogsAPIView(mixins.StackRelatedMixin, generics.GenericAPIView):
 class StackLogsDetailAPIView(mixins.StackRelatedMixin, generics.GenericAPIView):
     renderer_classes = (PlainTextRenderer,)
 
-    # TODO: Code complexity ignored for now
-    def get(self, request, *args, **kwargs):  # NOQA
+    def get(self, request, *args, **kwargs):
         stack = self.get_stack()
         log_file = self.kwargs.get('log', '')
 
@@ -463,13 +454,13 @@ class StackLogsDetailAPIView(mixins.StackRelatedMixin, generics.GenericAPIView):
                             status=status.HTTP_400_BAD_REQUEST)
 
         if log_file.endswith('.latest'):
-            log = join(stack.get_root_directory(), log_file)
+            log = os.path.join(stack.get_root_directory(), log_file)
         elif log_file.endswith('.log') or log_file.endswith('.err'):
-            log = join(stack.get_log_directory(), log_file)
+            log = os.path.join(stack.get_log_directory(), log_file)
         else:
             log = None
 
-        if not log or not isfile(log):
+        if not log or not os.path.isfile(log):
             raise ValidationError({
                 'log_file': ['Log file does not exist: {0}.'.format(log_file)]
             })
@@ -502,3 +493,21 @@ class StackFormulaVersionsAPIView(mixins.StackRelatedMixin, generics.ListCreateA
 
     def perform_create(self, serializer):
         serializer.save(content_object=self.get_stack())
+
+
+class StackModelUserPermissionsViewSet(StackdioModelUserPermissionsViewSet):
+    model_cls = models.Stack
+
+
+class StackModelGroupPermissionsViewSet(StackdioModelGroupPermissionsViewSet):
+    model_cls = models.Stack
+
+
+class StackObjectUserPermissionsViewSet(mixins.StackPermissionsMixin,
+                                        StackdioObjectUserPermissionsViewSet):
+    pass
+
+
+class StackObjectGroupPermissionsViewSet(mixins.StackPermissionsMixin,
+                                         StackdioObjectGroupPermissionsViewSet):
+    pass

@@ -15,19 +15,23 @@
 # limitations under the License.
 #
 
+from __future__ import unicode_literals
 
 import logging
 
+import actstream
 from celery import chain
+from stackdio.core.constants import Action, Activity
 
-from stackdio.api.cloud.providers.base import BaseCloudProvider
 from . import tasks
 
 logger = logging.getLogger(__name__)
 
 
 class WorkflowOptions(object):
-    DEFAULTS = {}
+    DEFAULTS = {
+        'max_attempts': 3,
+    }
 
     def __init__(self, opts):
         self.user_opts = opts
@@ -43,7 +47,7 @@ class WorkflowOptions(object):
 
 class LaunchWorkflowOptions(WorkflowOptions):
     DEFAULTS = {
-        'max_retries': 2,
+        'max_attempts': 3,
         # Skips launching if set to False
         'launch': True,
         'provision': True,
@@ -54,7 +58,6 @@ class LaunchWorkflowOptions(WorkflowOptions):
         # See stacks.tasks::launch_hosts for information on these params
         'simulate_launch_failures': False,
         'simulate_ssh_failures': False,
-        'simulate_zombies': False,
         'failure_percent': 0.3,
     }
 
@@ -102,30 +105,25 @@ class LaunchWorkflow(BaseWorkflow):
             tasks.launch_hosts.si(
                 stack_id,
                 parallel=opts.parallel,
-                max_retries=opts.max_retries,
+                max_attempts=opts.max_attempts,
                 simulate_launch_failures=opts.simulate_launch_failures,
                 simulate_ssh_failures=opts.simulate_ssh_failures,
-                simulate_zombies=opts.simulate_zombies,
                 failure_percent=opts.failure_percent
             ),
-            tasks.update_metadata.si(stack_id, host_ids=host_ids),
-            tasks.cure_zombies.si(stack_id, max_retries=opts.max_retries),
-            tasks.update_metadata.si(stack_id, host_ids=host_ids),
-            tasks.tag_infrastructure.si(stack_id, host_ids=self.host_ids),
-            tasks.register_dns.si(stack_id, host_ids=self.host_ids),
-            tasks.ping.si(stack_id),
+            tasks.update_metadata.si(stack_id, Activity.LAUNCHING, host_ids=host_ids),
+            tasks.tag_infrastructure.si(stack_id, activity=Activity.LAUNCHING, host_ids=host_ids),
+            tasks.register_dns.si(stack_id, Activity.LAUNCHING, host_ids=host_ids),
+            tasks.ping.si(stack_id, Activity.LAUNCHING),
             tasks.sync_all.si(stack_id),
-            tasks.highstate.si(stack_id, max_retries=opts.max_retries),
-            tasks.global_orchestrate.si(stack_id,
-                                        max_retries=opts.max_retries)
+            tasks.highstate.si(stack_id, max_attempts=opts.max_attempts),
+            tasks.global_orchestrate.si(stack_id, max_attempts=opts.max_attempts),
         ]
         if opts.provision:
-            l.append(tasks.orchestrate.si(stack_id,
-                                          max_retries=opts.max_retries))
+            l.append(tasks.orchestrate.si(stack_id,  max_attempts=opts.max_attempts))
         l.append(tasks.finish_stack.si(stack_id))
 
-        self.stack.set_status('queued', tasks.Stack.PENDING,
-                              'Stack has been submitted to launch queue.')
+        self.stack.set_activity(Activity.QUEUED)
+        actstream.action.send(self.stack, verb='was submitted to launch queue')
 
         return l
 
@@ -141,13 +139,13 @@ class DestroyHostsWorkflow(BaseWorkflow):
         host_ids = self.host_ids
 
         return [
-            tasks.update_metadata.si(stack_id, host_ids=host_ids),
+            tasks.update_metadata.si(stack_id, Activity.TERMINATING, host_ids=host_ids),
             tasks.register_volume_delete.si(stack_id, host_ids=host_ids),
-            tasks.unregister_dns.si(stack_id, host_ids=host_ids),
+            tasks.unregister_dns.si(stack_id, Activity.TERMINATING, host_ids=host_ids),
             tasks.destroy_hosts.si(stack_id,
                                    host_ids=host_ids,
                                    delete_security_groups=False),
-            tasks.finish_stack.si(stack_id),
+            tasks.finish_stack.si(stack_id, Activity.IDLE),
         ]
 
 
@@ -166,9 +164,9 @@ class DestroyStackWorkflow(BaseWorkflow):
     def task_list(self):
         stack_id = self.stack.pk
         return [
-            tasks.update_metadata.si(stack_id, remove_absent=False),
+            tasks.update_metadata.si(stack_id, Activity.TERMINATING),
             tasks.register_volume_delete.si(stack_id),
-            tasks.unregister_dns.si(stack_id),
+            tasks.unregister_dns.si(stack_id, Activity.TERMINATING),
             tasks.destroy_hosts.si(stack_id, parallel=self.opts.parallel),
             tasks.destroy_stack.si(stack_id),
         ]
@@ -187,68 +185,83 @@ class ActionWorkflow(BaseWorkflow):
     def task_list(self):
         # TODO: not generic enough
         base_tasks = {
-            BaseCloudProvider.ACTION_LAUNCH: [
+            Action.LAUNCH: [
                 tasks.launch_hosts.si(self.stack.id),
-                tasks.update_metadata.si(self.stack.id),
-                tasks.cure_zombies.si(self.stack.id),
             ],
-            BaseCloudProvider.ACTION_TERMINATE: [
-                tasks.update_metadata.si(self.stack.id, remove_absent=False),
+            Action.TERMINATE: [
+                tasks.update_metadata.si(self.stack.id, Activity.TERMINATING),
                 tasks.register_volume_delete.si(self.stack.id),
-                tasks.unregister_dns.si(self.stack.id),
+                tasks.unregister_dns.si(self.stack.id, Activity.TERMINATING),
                 tasks.destroy_hosts.si(self.stack.id, delete_hosts=False,
                                        delete_security_groups=False),
             ],
-            BaseCloudProvider.ACTION_PROVISION: [],
-            BaseCloudProvider.ACTION_ORCHESTRATE: [],
-            BaseCloudProvider.ACTION_STOP: [
-                tasks.unregister_dns.si(self.stack.id),
-                tasks.execute_action.si(self.stack.id, self.action, *self.args),
+            Action.PAUSE: [
+                tasks.execute_action.si(self.stack.id, self.action, Activity.PAUSING, *self.args),
             ],
-            BaseCloudProvider.ACTION_SSH: [
+            Action.RESUME: [
+                tasks.execute_action.si(self.stack.id, self.action, Activity.RESUMING, *self.args),
+            ],
+            Action.PROPAGATE_SSH: [
                 tasks.propagate_ssh.si(self.stack.id),
+            ],
+            Action.SINGLE_SLS: [
+                tasks.single_sls.si(self.stack.id, arg['component'], arg.get('host_target'))
+                for arg in self.args
             ],
         }
 
+        action_to_activity = {
+            Action.LAUNCH: Activity.LAUNCHING,
+            Action.TERMINATE: Activity.TERMINATING,
+            Action.PAUSE: Activity.PAUSING,
+            Action.RESUME: Activity.RESUMING,
+            Action.PROVISION: Activity.PROVISIONING,
+            Action.ORCHESTRATE: Activity.ORCHESTRATING,
+            Action.PROPAGATE_SSH: Activity.PROVISIONING,
+            Action.SINGLE_SLS: Activity.ORCHESTRATING,
+        }
+
+        action_to_end_activity = {
+            Action.LAUNCH: Activity.IDLE,
+            Action.TERMINATE: Activity.TERMINATED,
+            Action.PAUSE: Activity.PAUSED,
+            Action.RESUME: Activity.IDLE,
+            Action.PROVISION: Activity.IDLE,
+            Action.ORCHESTRATE: Activity.IDLE,
+            Action.PROPAGATE_SSH: Activity.IDLE,
+            Action.SINGLE_SLS: Activity.IDLE,
+        }
+
         # Start off with the base
-        if self.action in base_tasks:
-            task_list = base_tasks[self.action]
-        else:
-            task_list = [tasks.execute_action.si(self.stack.id, self.action, *self.args)]
+        task_list = base_tasks.get(self.action, [])
 
         # Update the metadata after the main action has been executed
-        if self.action != BaseCloudProvider.ACTION_TERMINATE:
-            task_list.append(tasks.update_metadata.si(self.stack.id))
+        if self.action not in (Action.SINGLE_SLS, Action.TERMINATE):
+            task_list.append(tasks.update_metadata.si(self.stack.id,
+                                                      action_to_activity[self.action]))
 
-        # Launching requires us to tag the newly available infrastructure
-        if self.action in (BaseCloudProvider.ACTION_LAUNCH,):
-            task_list.append(tasks.tag_infrastructure.si(self.stack.id))
+        # Resuming and launching requires DNS updates
+        if self.action in (Action.RESUME, Action.LAUNCH):
+            task_list.append(tasks.tag_infrastructure.si(
+                self.stack.id,
+                activity=action_to_activity[self.action],
+            ))
+            task_list.append(tasks.register_dns.si(self.stack.id, action_to_activity[self.action]))
 
-        # Starting and launching requires DNS updates
-        if self.action in (BaseCloudProvider.ACTION_START,
-                           BaseCloudProvider.ACTION_LAUNCH):
-            task_list.append(tasks.register_dns.si(self.stack.id))
-
-        # starting, launching, or reprovisioning requires us to execute the
+        # resuming, launching, or reprovisioning requires us to execute the
         # provisioning tasks
-        if self.action in (BaseCloudProvider.ACTION_START,
-                           BaseCloudProvider.ACTION_LAUNCH,
-                           BaseCloudProvider.ACTION_PROVISION,
-                           BaseCloudProvider.ACTION_ORCHESTRATE):
-            task_list.append(tasks.ping.si(self.stack.id))
+        if self.action in (Action.RESUME, Action.LAUNCH, Action.PROVISION, Action.ORCHESTRATE):
+            task_list.append(tasks.ping.si(self.stack.id, action_to_activity[self.action]))
             task_list.append(tasks.sync_all.si(self.stack.id))
 
-        if self.action in (BaseCloudProvider.ACTION_START,
-                           BaseCloudProvider.ACTION_LAUNCH,
-                           BaseCloudProvider.ACTION_PROVISION):
+        if self.action in (Action.LAUNCH, Action.PROVISION):
             task_list.append(tasks.highstate.si(self.stack.id))
-            task_list.append(tasks.global_orchestrate.si(self.stack.id))
-            task_list.append(tasks.orchestrate.si(self.stack.id))
 
-        if self.action == BaseCloudProvider.ACTION_ORCHESTRATE:
-            task_list.append(tasks.orchestrate.si(self.stack.id, 2))
+        if self.action in (Action.LAUNCH, Action.PROVISION, Action.ORCHESTRATE):
+            task_list.append(tasks.global_orchestrate.si(self.stack.id))
+            task_list.append(tasks.orchestrate.si(self.stack.id, self.opts.max_attempts))
 
         # Always finish the stack
-        task_list.append(tasks.finish_stack.si(self.stack.id))
+        task_list.append(tasks.finish_stack.si(self.stack.id, action_to_end_activity[self.action]))
 
         return task_list

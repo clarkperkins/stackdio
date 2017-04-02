@@ -15,6 +15,9 @@
 # limitations under the License.
 #
 
+from __future__ import unicode_literals
+
+from functools import reduce
 from operator import or_
 
 import django_filters
@@ -48,7 +51,7 @@ class OrFieldsFilter(django_filters.Filter):
 
         if self.include_labels:
             if ':' in value:
-                k, v = value.split(':')
+                k, v = value.split(':', 1)
                 v = v if v else None
             else:
                 k, v = value, None
@@ -71,7 +74,7 @@ class LabelFilterMixin(object):
 
     def filter_label(self, queryset, value):
         if ':' in value:
-            k, v = value.split(':')
+            k, v = value.split(':', 1)
             v = v if v else None
         else:
             k, v = value, None

@@ -43,6 +43,12 @@ class APIRootView(APIView):
             ('version', reverse('stackdio:version',
                                 request=request,
                                 format=format)),
+            ('events', reverse('stackdio:event-list',
+                               request=request,
+                               format=format)),
+            ('notifications', reverse('stackdio:notifications:root',
+                                      request=request,
+                                      format=format)),
             ('users', reverse('api:users:user-list',
                               request=request,
                               format=format)),
@@ -64,6 +70,9 @@ class APIRootView(APIView):
             ('stacks', reverse('api:stacks:stack-list',
                                request=request,
                                format=format)),
+            ('environments', reverse('api:environments:environment-list',
+                                     request=request,
+                                     format=format)),
             ('volumes', reverse('api:volumes:volume-list',
                                 request=request,
                                 format=format)),
@@ -142,13 +151,14 @@ urlpatterns = (
     ##
     # IMPORTS URLS FROM ALL APPS
     ##
-    url(r'^', include('stackdio.api.users.urls', namespace='users')),
     url(r'^cloud/', include('stackdio.api.cloud.urls', namespace='cloud')),
     url(r'^blueprints/', include('stackdio.api.blueprints.urls', namespace='blueprints')),
     url(r'^formulas/', include('stackdio.api.formulas.urls', namespace='formulas')),
-    url(r'^', include('stackdio.api.stacks.urls', namespace='stacks')),
+    url(r'^stacks/', include('stackdio.api.stacks.urls', namespace='stacks')),
+    url(r'^environments/', include('stackdio.api.environments.urls', namespace='environments')),
     url(r'^volumes/', include('stackdio.api.volumes.urls', namespace='volumes')),
     url(r'^search/', include('stackdio.api.search.urls', namespace='search')),
+    url(r'^', include('stackdio.api.users.urls', namespace='users')),
 )
 
 # Format suffixes - this only should go on API endpoints, not everything!

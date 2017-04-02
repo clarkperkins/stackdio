@@ -15,14 +15,15 @@
 # limitations under the License.
 #
 
+from __future__ import unicode_literals
 
 from django.conf.urls import include, url
-from rest_framework import routers
+from stackdio.core import routers
 
 from . import api
 
 
-user_model_router = routers.SimpleRouter()
+user_model_router = routers.SimpleBulkRouter()
 user_model_router.register(r'users',
                            api.UserModelUserPermissionsViewSet,
                            'user-model-user-permissions')
@@ -31,7 +32,7 @@ user_model_router.register(r'groups',
                            'user-model-group-permissions')
 
 
-model_router = routers.SimpleRouter()
+model_router = routers.SimpleBulkRouter()
 model_router.register(r'users',
                       api.GroupModelUserPermissionsViewSet,
                       'group-model-user-permissions')
@@ -40,7 +41,7 @@ model_router.register(r'groups',
                       'group-model-group-permissions')
 
 
-object_router = routers.SimpleRouter()
+object_router = routers.SimpleBulkRouter()
 object_router.register(r'users',
                        api.GroupObjectUserPermissionsViewSet,
                        'group-object-user-permissions')
@@ -61,7 +62,7 @@ urlpatterns = (
         api.UserDetailAPIView.as_view(),
         name='user-detail'),
 
-    url(r'^users/(?P<username>[\w.@+-]+)/groups/$',
+    url(r'^users/(?P<parent_username>[\w.@+-]+)/groups/$',
         api.UserGroupListAPIView.as_view(),
         name='user-grouplist'),
 
@@ -76,20 +77,44 @@ urlpatterns = (
         api.GroupDetailAPIView.as_view(),
         name='group-detail'),
 
-    url(r'^groups/(?P<name>[\w.@+-]+)/permissions/',
+    url(r'^groups/(?P<parent_name>[\w.@+-]+)/permissions/',
         include(object_router.urls)),
 
-    url(r'^groups/(?P<name>[\w.@+-]+)/users/$',
+    url(r'^groups/(?P<parent_name>[\w.@+-]+)/users/$',
         api.GroupUserListAPIView.as_view(),
         name='group-userlist'),
 
-    url(r'^groups/(?P<name>[\w.@+-]+)/action/$',
+    url(r'^groups/(?P<parent_name>[\w.@+-]+)/action/$',
         api.GroupActionAPIView.as_view(),
         name='group-action'),
+
+    url(r'^groups/(?P<parent_name>[\w.@+-]+)/channels/$',
+        api.GroupChannelListAPIView.as_view(),
+        name='group-channel-list'),
+
+    url(r'^groups/(?P<parent_name>[\w.@+-]+)/channels/(?P<name>[\w.@+-]+)/$',
+        api.GroupChannelDetailAPIView.as_view(),
+        name='group-channel-detail'),
 
     url(r'^user/$',
         api.CurrentUserDetailAPIView.as_view(),
         name='currentuser-detail'),
+
+    url(r'^user/token/$',
+        api.AuthToken.as_view(),
+        name='currentuser-token'),
+
+    url(r'^user/token/reset/$',
+        api.ResetAuthToken.as_view(),
+        name='currentuser-token-reset'),
+
+    url(r'^user/channels/$',
+        api.CurrentUserChannelListAPIView.as_view(),
+        name='currentuser-channel-list'),
+
+    url(r'^user/channels/(?P<name>[\w.@+-]+)/$',
+        api.CurrentUserChannelDetailAPIView.as_view(),
+        name='currentuser-channel-detail'),
 
     url(r'^user/password/$',
         api.ChangePasswordAPIView.as_view(),

@@ -15,27 +15,28 @@
 # limitations under the License.
 #
 
+from __future__ import unicode_literals
 
 import logging
-import json
 import os
 
+import six
 import yaml
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericRelation
 from django.db import models
-from django.core.files.storage import FileSystemStorage
-from django.core.files.base import ContentFile
 from django_extensions.db.models import (
     TimeStampedModel,
     TitleSlugDescriptionModel,
 )
 from salt.version import __version__ as salt_version
 
-from stackdio.core.queryset_transform import TransformQuerySet
-from stackdio.core.fields import DeletingFileField
 from stackdio.api.cloud.providers.base import GroupNotFoundException
-from .utils import get_cloud_provider_choices, get_provider_driver_class
+from stackdio.api.cloud.utils import get_cloud_provider_choices, get_provider_driver_class
+from stackdio.api.formulas.models import FormulaVersion
+from stackdio.core.fields import JSONField
+from stackdio.core.queryset_transform import TransformQuerySet
+from stackdio.core.utils import recursive_update
 
 logger = logging.getLogger(__name__)
 
@@ -48,18 +49,11 @@ FILESYSTEM_CHOICES = (
 )
 
 
-def get_config_file_path(instance, filename):
-    return filename
-
-
-def get_global_orch_props_file_path(instance, filename):
-    return 'cloud/{0}/{1}'.format(instance.slug, filename)
-
-
 _cloudprovider_model_permissions = ()
 _cloudprovider_object_permissions = ('view', 'admin')
 
 
+@six.python_2_unicode_compatible
 class CloudProvider(models.Model):
 
     model_permissions = _cloudprovider_model_permissions
@@ -76,8 +70,8 @@ class CloudProvider(models.Model):
         choices=PROVIDER_CHOICES,
         unique=True)
 
-    def __unicode__(self):
-        return self.name
+    def __str__(self):
+        return six.text_type(self.name)
 
     def get_driver(self):
         # determine the provider driver class
@@ -100,6 +94,7 @@ _cloudaccount_object_permissions = (
 )
 
 
+@six.python_2_unicode_compatible
 class CloudAccount(TimeStampedModel, TitleSlugDescriptionModel):
 
     model_permissions = _cloudaccount_model_permissions
@@ -138,27 +133,11 @@ class CloudAccount(TimeStampedModel, TitleSlugDescriptionModel):
     # Grab the formula versions
     formula_versions = GenericRelation('formulas.FormulaVersion')
 
-    # salt-cloud provider configuration file
-    config_file = DeletingFileField(
-        max_length=255,
-        upload_to=get_config_file_path,
-        null=True,
-        blank=True,
-        default=None,
-        storage=FileSystemStorage(
-            location=settings.STACKDIO_CONFIG.salt_providers_dir))
+    # Properties for this account
+    global_orchestration_properties = JSONField('Global Orchestration Properties')
 
-    # storage for properties file
-    global_orch_props_file = DeletingFileField(
-        max_length=255,
-        upload_to=get_global_orch_props_file_path,
-        null=True,
-        blank=True,
-        default=None,
-        storage=FileSystemStorage(location=settings.FILE_STORAGE_DIRECTORY))
-
-    def __unicode__(self):
-        return self.title
+    def __str__(self):
+        return six.text_type(self.title)
 
     @property
     def vpc_enabled(self):
@@ -170,6 +149,13 @@ class CloudAccount(TimeStampedModel, TitleSlugDescriptionModel):
 
         # Return an instance of the provider driver
         return provider_class(self)
+
+    def get_config_file_path(self):
+        basedir = settings.STACKDIO_CONFIG.salt_providers_dir
+        if not os.path.isdir(basedir):
+            os.makedirs(basedir)
+
+        return os.path.join(basedir, '{}.conf'.format(self.slug))
 
     def update_config(self):
         """
@@ -184,30 +170,9 @@ class CloudAccount(TimeStampedModel, TitleSlugDescriptionModel):
         self.yaml = yaml.safe_dump(account_yaml, default_flow_style=False)
         self.save()
 
-        if not self.config_file:
-            self.config_file.save(self.slug + '.conf', ContentFile(self.yaml))
-        else:
-            with open(self.config_file.path, 'w') as f:
-                # update the yaml to include updated security group information
-                f.write(self.yaml)
-
-    def _get_global_orchestration_properties(self):
-        if not self.global_orch_props_file:
-            return {}
-        with open(self.global_orch_props_file.path) as f:
-            return json.loads(f.read())
-
-    def _set_global_orchestration_properties(self, props):
-        props_json = json.dumps(props, indent=4)
-        if not self.global_orch_props_file:
-            self.global_orch_props_file.save('global_orch.props', ContentFile(props_json))
-        else:
-            with open(self.global_orch_props_file.path, 'w') as f:
-                f.write(props_json)
-
-    # Add as a property
-    global_orchestration_properties = property(_get_global_orchestration_properties,
-                                               _set_global_orchestration_properties)
+        with open(self.get_config_file_path(), 'w') as f:
+            # update the yaml to include updated security group information
+            f.write(self.yaml)
 
     def get_root_directory(self):
         return os.path.join(settings.FILE_STORAGE_DIRECTORY, 'cloud', self.slug)
@@ -219,7 +184,38 @@ class CloudAccount(TimeStampedModel, TitleSlugDescriptionModel):
 
         return list(formulas)
 
+    def get_full_pillar(self):
+        pillar_props = {}
 
+        # If any of the formulas we're using have default pillar
+        # data defined in its corresponding SPECFILE, we need to pull
+        # that into our stack pillar file.
+
+        # First get the unique set of formulas
+        formulas = self.get_formulas()
+
+        # for each unique formula, pull the properties from the SPECFILE
+        for formula in formulas:
+            # Grab the formula version
+            try:
+                version = self.formula_versions.get(formula=formula).version
+            except FormulaVersion.DoesNotExist:
+                version = formula.default_version
+
+            # Update the formula
+            formula.get_gitfs().update()
+
+            # Add it to the rest of the pillar
+            recursive_update(pillar_props, formula.properties(version))
+
+        # Add in properties that were supplied via the blueprint and during
+        # stack creation
+        recursive_update(pillar_props, self.global_orchestration_properties)
+
+        return pillar_props
+
+
+@six.python_2_unicode_compatible
 class CloudInstanceSize(TitleSlugDescriptionModel):
     class Meta:
         ordering = ('id',)
@@ -231,13 +227,15 @@ class CloudInstanceSize(TitleSlugDescriptionModel):
     # '512MB Standard Instance'
 
     # link to the type of provider for this instance size
-    provider = models.ForeignKey('cloud.CloudProvider', verbose_name='Cloud Provider')
+    provider = models.ForeignKey('cloud.CloudProvider',
+                                 verbose_name='Cloud Provider',
+                                 related_name='instance_sizes')
 
     # The underlying size ID of the instance (e.g., t1.micro)
     instance_id = models.CharField('Instance ID', max_length=64)
 
-    def __unicode__(self):
-        return '{0} ({1})'.format(self.description, self.instance_id)
+    def __str__(self):
+        return six.text_type('{0} ({1})'.format(self.description, self.instance_id))
 
 
 _cloudimage_model_permissions = (
@@ -253,6 +251,7 @@ _cloudimage_object_permissions = (
 )
 
 
+@six.python_2_unicode_compatible
 class CloudImage(TimeStampedModel, TitleSlugDescriptionModel):
 
     model_permissions = _cloudimage_model_permissions
@@ -283,20 +282,15 @@ class CloudImage(TimeStampedModel, TitleSlugDescriptionModel):
     # up to the salt-master automatically.
     ssh_user = models.CharField('SSH User', max_length=64)
 
-    # salt-cloud profile configuration file
-    config_file = DeletingFileField(
-        max_length=255,
-        upload_to=get_config_file_path,
-        null=True,
-        blank=True,
-        default=None,
-        storage=FileSystemStorage(
-            location=settings.STACKDIO_CONFIG.salt_profiles_dir
-        )
-    )
+    def __str__(self):
+        return six.text_type(self.title)
 
-    def __unicode__(self):
-        return self.title
+    def get_config_file_path(self):
+        basedir = settings.STACKDIO_CONFIG.salt_profiles_dir
+        if not os.path.isdir(basedir):
+            os.makedirs(basedir)
+
+        return os.path.join(basedir, '{}.conf'.format(self.slug))
 
     def update_config(self):
         """
@@ -323,12 +317,9 @@ class CloudImage(TimeStampedModel, TitleSlugDescriptionModel):
         profile_yaml = yaml.safe_dump(profile_yaml,
                                       default_flow_style=False)
 
-        if not self.config_file:
-            self.config_file.save(self.slug + '.conf', ContentFile(profile_yaml))
-        else:
-            with open(self.config_file.path, 'w') as f:
-                # update the yaml to include updated security group information
-                f.write(profile_yaml)
+        with open(self.get_config_file_path(), 'w') as f:
+            # update the yaml to include updated security group information
+            f.write(profile_yaml)
 
     def get_driver(self):
         return self.account.get_driver()
@@ -347,6 +338,7 @@ _snapshot_object_permissions = (
 )
 
 
+@six.python_2_unicode_compatible
 class Snapshot(TimeStampedModel, TitleSlugDescriptionModel):
 
     model_permissions = _snapshot_model_permissions
@@ -363,17 +355,16 @@ class Snapshot(TimeStampedModel, TitleSlugDescriptionModel):
 
     # The snapshot id. Must exist already, be preformatted, and available
     # to the associated cloud account
-    snapshot_id = models.CharField(max_length=32)
-
-    # How big the snapshot is...this doesn't actually affect the actual
-    # volume size, but mainly a useful hint to the user
-    size_in_gb = models.IntegerField()
+    snapshot_id = models.CharField('Snapshot ID', max_length=32)
 
     # the type of file system the volume uses
-    filesystem_type = models.CharField(max_length=16,
-                                       choices=FILESYSTEM_CHOICES)
+    filesystem_type = models.CharField('Filesystem Type', max_length=16, choices=FILESYSTEM_CHOICES)
+
+    def __str__(self):
+        return six.text_type(self.snapshot_id)
 
 
+@six.python_2_unicode_compatible
 class CloudRegion(TitleSlugDescriptionModel):
     class Meta:
         unique_together = ('title', 'provider')
@@ -382,12 +373,15 @@ class CloudRegion(TitleSlugDescriptionModel):
         default_permissions = ()
 
     # link to the type of provider for this zone
-    provider = models.ForeignKey('cloud.CloudProvider', verbose_name='Cloud Provider')
+    provider = models.ForeignKey('cloud.CloudProvider',
+                                 verbose_name='Cloud Provider',
+                                 related_name='regions')
 
-    def __unicode__(self):
-        return self.title
+    def __str__(self):
+        return six.text_type(self.title)
 
 
+@six.python_2_unicode_compatible
 class CloudZone(TitleSlugDescriptionModel):
     class Meta:
         unique_together = ('title', 'region')
@@ -396,10 +390,12 @@ class CloudZone(TitleSlugDescriptionModel):
         default_permissions = ()
 
     # link to the region this AZ is in
-    region = models.ForeignKey('CloudRegion', related_name='zones')
+    region = models.ForeignKey('cloud.CloudRegion',
+                               verbose_name='Cloud Region',
+                               related_name='zones')
 
-    def __unicode__(self):
-        return self.title
+    def __str__(self):
+        return six.text_type(self.title)
 
     @property
     def provider(self):
@@ -442,6 +438,7 @@ _securitygroup_object_permissions = (
 )
 
 
+@six.python_2_unicode_compatible
 class SecurityGroup(TimeStampedModel, models.Model):
 
     model_permissions = _securitygroup_model_permissions
@@ -496,8 +493,8 @@ class SecurityGroup(TimeStampedModel, models.Model):
     # based on the blueprint used to create the stack
     is_managed = models.BooleanField(default=False)
 
-    def __unicode__(self):
-        return self.name
+    def __str__(self):
+        return six.text_type(self.name)
 
     def get_active_hosts(self):
         return self.hosts.count()

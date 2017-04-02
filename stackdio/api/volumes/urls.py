@@ -15,13 +15,14 @@
 # limitations under the License.
 #
 
+from __future__ import unicode_literals
 
 from django.conf.urls import include, url
-from rest_framework import routers
 
+from stackdio.core import routers
 from . import api
 
-model_router = routers.SimpleRouter()
+model_router = routers.SimpleBulkRouter()
 model_router.register(r'users',
                       api.VolumeModelUserPermissionsViewSet,
                       'volume-model-user-permissions')
@@ -30,7 +31,7 @@ model_router.register(r'groups',
                       'volume-model-group-permissions')
 
 
-object_router = routers.SimpleRouter()
+object_router = routers.SimpleBulkRouter()
 object_router.register(r'users',
                        api.VolumeObjectUserPermissionsViewSet,
                        'volume-object-user-permissions')
@@ -51,6 +52,6 @@ urlpatterns = (
         api.VolumeDetailAPIView.as_view(),
         name='volume-detail'),
 
-    url(r'^(?P<pk>[0-9]+)/permissions/',
+    url(r'^(?P<parent_pk>[0-9]+)/permissions/',
         include(object_router.urls)),
 )

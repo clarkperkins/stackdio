@@ -1,10 +1,10 @@
 {
     "variables": {
         "version": "{{ env `STACKDIO_VERSION` }}",
-        "source_ami": "ami-767a391e",
+        "source_ami": "ami-29f96d3e",
         "aws_access_key": "{{ env `AWS_ACCESS_KEY` }}",
         "aws_secret_key": "{{ env `AWS_SECRET_KEY` }}",
-        "packages": "python python-dev python-virtualenv mysql-server mysql-client libssl-dev libncurses5-dev swig libmysqlclient-dev rabbitmq-server git nginx libldap2-dev libsasl2-dev ntp ntpdate ntp-doc"
+        "packages": "python python-dev python-virtualenv postgresql libpq-dev redis-server gcc git nginx ntp ntpdate ntp-doc"
     },
     "builders": [
         {
@@ -38,14 +38,10 @@
     ],
     "provisioners": [
         {
-            "type": "file",
-            "source": "dist/stackdio_server-{{ user `version` }}-py2-none-any.whl",
-            "destination": "/tmp/stackdio_server-{{ user `version` }}-py2-none-any.whl"
-        },
-        {
             "type": "shell",
             "inline": [
                 "apt-get update",
+                "apt-get upgrade -y",
                 "apt-get install -y {{ user `packages` }}"
             ],
             "execute_command": "{{ .Vars }} sudo -E sh '{{ .Path }}'"
@@ -76,14 +72,19 @@
             "destination": "/tmp/stackdio-data.json"
         },
         {
+            "type": "file",
+            "source": "packer/stackdio.yaml",
+            "destination": "/tmp/stackdio.yaml"
+        },
+        {
             "type": "shell",
             "script": "packer/install.sh",
-            "execute_command": "{{ .Vars }} STACKDIO_VERSION={{ user `version` }} sudo -E sh '{{ .Path }}'"
+            "execute_command": "sudo su - root -c \"{{ .Vars }} STACKDIO_VERSION={{ user `version` }} sh '{{ .Path }}'\""
         },
         {
             "type": "shell",
             "script": "packer/configure.sh",
-            "execute_command": "{{ .Vars }} sudo su - stackdio -c \"sh '{{ .Path }}'\""
+            "execute_command": "sudo su - stackdio -c \"{{ .Vars }} sh '{{ .Path }}'\""
         },
         {
             "type": "shell",
