@@ -25,7 +25,6 @@ from django.db.models.signals import post_migrate
 from django.utils.translation import ugettext_lazy as _
 
 from stackdio.core.constants import Events
-from stackdio.core.models import Event
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +34,9 @@ def create_event_tags(app_config, verbosity=2, interactive=True,
 
     if not app_config.models_module:
         return
+
+    # Import here so that the apps are ready by the time we try to import
+    from stackdio.core.models import Event
 
     for tag in Events.ALL:
         # Create the event tag if it doesn't exist
