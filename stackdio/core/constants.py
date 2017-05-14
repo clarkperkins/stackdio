@@ -19,6 +19,15 @@
 from __future__ import unicode_literals
 
 
+class Events(object):
+    """
+    Define valid event tags
+    """
+    STACK_FINISHED = 'stack-finished'
+
+    ALL = [STACK_FINISHED]
+
+
 class Health(object):
     """
     Define valid values for the health of stacks / hosts / components

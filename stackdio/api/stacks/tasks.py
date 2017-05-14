@@ -46,7 +46,7 @@ from stackdio.api.cloud.providers.base import DeleteGroupException
 from stackdio.api.stacks import utils, validators
 from stackdio.api.stacks.exceptions import StackTaskException
 from stackdio.api.stacks.models import Stack, StackCommand, StackHistory
-from stackdio.core.constants import Activity, ComponentStatus, Health
+from stackdio.core.constants import Activity, ComponentStatus, Events, Health
 from stackdio.core.events import trigger_event
 from stackdio.core.utils import auto_retry
 from stackdio.salt.utils.client import (
@@ -908,7 +908,7 @@ def finish_stack(stack, activity=Activity.IDLE):
     stack.set_activity(activity)
 
     # Trigger our event
-    trigger_event('stack-finished', stack)
+    trigger_event(Events.STACK_FINISHED, stack)
 
 
 @stack_task(name='stacks.register_volume_delete')
