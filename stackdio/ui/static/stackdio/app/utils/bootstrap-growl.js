@@ -19,18 +19,10 @@
  * Adapted from bootstrap-growl (https://github.com/ifightcrime/bootstrap-growl)
  */
 
-((function (root, factory) {
-
-    // CommonJS
-    if (typeof exports === 'object') {
-        module.exports = factory(require('jquery', 'bootstrap'));
-    }
-    // AMD module
-    else if (typeof define === 'function' && define.amd) {
-        define(['jquery', 'bootstrap'], factory);
-    }
-
-})(this, function ($) {
+define([
+    'jquery',
+    'bootstrap'
+], function ($) {
     $.bootstrapGrowl = function (message, options) {
         var $alert, css, offsetAmount;
 
@@ -85,4 +77,4 @@
         stackup_spacing: 10
     };
 
-}));
+});

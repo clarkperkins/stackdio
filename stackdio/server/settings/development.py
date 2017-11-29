@@ -39,6 +39,10 @@ DATABASES['default']['CONN_MAX_AGE'] = 0
 # Add in the secure proxy header
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTOCOL', 'ssl')
 
+STATICFILES_DIRS = [
+    ('stackdio/lib', os.path.join(BASE_DIR, 'node_modules')),
+]
+
 ##
 # Add in additional applications
 ##

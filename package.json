@@ -1,26 +1,47 @@
 {
-  "name": "stackd.io",
-  "version": "0.8.0.dev",
-  "description": "a modern cloud deployment and provisioning framework for everyone",
-  "repository": "https://github.com/stackdio/stackdio.git",
-  "author": "Clark Perkins <clark.perkins@digitalreasoning.com>",
-  "license": "Apache 2",
-  "private": true,
-  "dependencies": {
-    "bootbox": "~4.4.0",
-    "bootstrap": "~3.3.0",
-    "font-awesome": "~4.6.0",
-    "fuelux": "~3.15.0",
-    "jquery": "~2.2.0",
-    "js-cookie": "~2.1.0",
-    "knockout": "~3.4.0",
-    "ladda": "~1.0.0",
-    "moment": "~2.14.0",
-    "requirejs": "~2.2.0",
-    "requirejs-domReady": "https://github.com/requirejs/domReady.git#2.0.1",
-    "select2": "~4.0.0",
-    "select2-bootstrap-theme": "https://github.com/select2/select2-bootstrap-theme.git#0.1.0-beta.8",
-    "typeahead.js": "~0.11.0",
-    "underscore": "~1.8.0"
-  }
+    "name": "stackd.io",
+    "version": "0.8.0.dev",
+    "homepage": "http://www.stackd.io",
+    "author": "Clark Perkins <clark.perkins@digitalreasoning.com>",
+    "description": "a modern cloud deployment and provisioning framework for everyone",
+    "keywords": [
+        "cloud",
+        "provisioning",
+        "deployment",
+        "infrastructure",
+        "orchestration"
+    ],
+    "license": "Apache 2",
+    "private": true,
+    "ignore": [
+        "**/.*",
+        "node_modules",
+        "stackdio/ui/static/stackdio/lib",
+        "stackdio/ui/static/stackdio/bundles",
+        "test",
+        "tests"
+    ],
+    "dependencies": {
+        "bootbox.js": "~4.3.0",
+        "bootstrap": "~3.3.0",
+        "font-awesome": "~4.6.0",
+        "fuelux": "~3.15.0",
+        "jquery": "~2.2.0",
+        "js-cookie": "~2.1.0",
+        "knockout": "~3.4.0",
+        "ladda": "~1.0.0",
+        "moment": "~2.14.0",
+        "select2": "~4.0.0",
+        "select2-bootstrap-theme": "0.1.0-beta.10",
+        "typeahead.js": "~0.11.0",
+        "underscore": "~1.8.0"
+    },
+    "resolutions": {
+        "jquery": "2.2.4",
+        "moment": "2.14.1"
+    },
+    "devDependencies": {
+        "webpack": "^3.8.1",
+        "webpack-bundle-tracker": "^0.2.0"
+    }
 }
