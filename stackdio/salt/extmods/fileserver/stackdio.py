@@ -29,7 +29,7 @@ This fileserver backend serves files from the Master's local filesystem.
 This backend allows us to have several environments that change dynamically rather
 than static environments in the config file.
 """
-from __future__ import absolute_import
+from __future__ import absolute_import, unicode_literals
 
 import errno
 import logging

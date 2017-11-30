@@ -21,8 +21,9 @@ Loads a stack-specific pillar file. stack_pillar_file must be set in the grains
 or this module will not be available to pillar.
 """
 
-from __future__ import absolute_import
+from __future__ import absolute_import, unicode_literals
 
+import io
 import logging
 import os
 
@@ -103,7 +104,7 @@ def ext_pillar(minion_id, pillar, *args, **kwargs):
     if 'stack_pillar_file' in __grains__:
         # load the stack_pillar_file, rendered as yaml, and add it into the return dict
         try:
-            with open(__grains__['stack_pillar_file'], 'r') as f:
+            with io.open(__grains__['stack_pillar_file'], 'r') as f:
                 loaded_pillar = yaml.safe_load(f)
                 recursive_update(new_pillar, loaded_pillar)
         except Exception as e:

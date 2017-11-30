@@ -69,11 +69,9 @@ requirements = [
     'celery[redis]~=3.1.0',
     'Django~=1.9.0',
     'djangorestframework~=3.4.0',
-    'salt~=2016.3.0,!=2016.3.3',
+    'salt~=2017.7.0',
 
     # Used, but still hold an upper bound on the version
-    'boto~=2.32',
-    'boto3~=1.4.0',
     'django-activity-stream~=0.6.0',
     'django-extensions~=1.6.0',
     'django-filter~=0.9',
@@ -83,14 +81,16 @@ requirements = [
     'Jinja2~=2.0',
 
     # Light usage, no need to have an upper bound on the version
-    'dj-database-url>=0.3',
+    'boto',
+    'boto3',
+    'dj-database-url',
     'envoy',
-    'GitPython>=2.0',
-    'Markdown>=2.6',
+    'GitPython',
+    'Markdown',
     'pip>=6',
-    'PyYAML>=3.10',
-    'requests>=2.4',
-    'six>=1.6',
+    'PyYAML',
+    'requests',
+    'six',
 ]
 
 testing_requirements = [
