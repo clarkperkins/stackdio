@@ -220,7 +220,7 @@ class Environment(TimeStampedModel):
 
         result = client.cmd_iter('env:environments.{}'.format(self.name),
                                  'grains.items',
-                                 expr_form='grain')
+                                 tgt_type='grain')
 
         ret = []
         for res in result:

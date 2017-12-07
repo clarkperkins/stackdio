@@ -88,7 +88,7 @@ def sync_all(environment):
 
     ret = client.cmd_iter('env:environments.{}'.format(environment.name),
                           'saltutil.sync_all',
-                          expr_form='grain')
+                          tgt_type='grain')
 
     result = {}
     for res in ret:
@@ -138,7 +138,7 @@ def highstate(environment, max_attempts=3):
 
             results = client.run('env:environments.{}'.format(environment.name),
                                  'state.highstate',
-                                 expr_form='grain')
+                                 tgt_type='grain')
 
             if results['failed']:
                 raise EnvironmentTaskException(
@@ -182,7 +182,7 @@ def propagate_ssh(environment, max_attempts=3):
             results = client.run('env:environments.{}'.format(environment.name),
                                  'state.sls',
                                  arg=['core.stackdio_users'],
-                                 expr_form='grain')
+                                 tgt_type='grain')
 
             if results['failed']:
                 raise EnvironmentTaskException(
@@ -256,10 +256,10 @@ def single_sls(environment, component, host_target, max_attempts=3):
 
     if host_target:
         target = '{0} and G@env:environments.{1}'.format(host_target, environment.name)
-        expr_form = 'compound'
+        tgt_type = 'compound'
     else:
         target = 'env:environments.{0}'.format(environment.name)
-        expr_form = 'grain'
+        tgt_type = 'grain'
 
     @auto_retry('single_sls', max_attempts, EnvironmentTaskException)
     def do_single_sls(attempt=None):
@@ -280,7 +280,7 @@ def single_sls(environment, component, host_target, max_attempts=3):
                     component,
                     'environments.{0}'.format(environment.name),
                 ],
-                expr_form=expr_form,
+                tgt_type=tgt_type,
             )
 
             if results['failed']:

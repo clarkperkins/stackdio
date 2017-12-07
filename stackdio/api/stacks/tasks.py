@@ -145,7 +145,7 @@ def change_pillar(stack, global_orch):
             'global_orchestration',
             global_orch,
         ],
-        expr_form='list',
+        tgt_type='list',
     )
 
     # TODO Want to do error checking, but don't know what errors look
@@ -434,7 +434,7 @@ def ping(stack, activity, interval=5, max_failures=10):
     failures = 0
 
     while True:
-        ret = client.cmd_iter(required_hosts, 'test.ping', expr_form='list')
+        ret = client.cmd_iter(required_hosts, 'test.ping', tgt_type='list')
 
         result = {}
         for res in ret:
@@ -488,7 +488,7 @@ def sync_all(stack):
     target = [h.hostname for h in stack.get_hosts()]
     client = salt.client.LocalClient(settings.STACKDIO_CONFIG.salt_master_config)
 
-    ret = client.cmd_iter(target, 'saltutil.sync_all', kwarg={'saltenv': 'base'}, expr_form='list')
+    ret = client.cmd_iter(target, 'saltutil.sync_all', kwarg={'saltenv': 'base'}, tgt_type='list')
 
     result = {}
     for res in ret:
@@ -551,7 +551,7 @@ def highstate(stack, max_attempts=3):
                                  root_dir=root_dir,
                                  log_dir=log_dir) as client:
 
-            results = client.run(target, 'state.highstate', expr_form='list')
+            results = client.run(target, 'state.highstate', tgt_type='list')
 
             if results['failed']:
                 raise StackTaskException(
@@ -611,7 +611,7 @@ def propagate_ssh(stack, max_attempts=3):
                                  root_dir=root_dir,
                                  log_dir=log_dir) as client:
 
-            results = client.run(target, 'state.sls', arg=['core.stackdio_users'], expr_form='list')
+            results = client.run(target, 'state.sls', arg=['core.stackdio_users'], tgt_type='list')
 
             if results['failed']:
                 raise StackTaskException(
@@ -838,10 +838,10 @@ def single_sls(stack, component, host_target, max_attempts=3):
 
     if host_target:
         target = '{0} and L@{1}'.format(host_target, ','.join(list_target))
-        expr_form = 'compound'
+        tgt_type = 'compound'
     else:
         target = list_target
-        expr_form = 'list'
+        tgt_type = 'list'
 
     @auto_retry('single_sls', max_attempts, StackTaskException)
     def do_single_sls(attempt=None):
@@ -875,7 +875,7 @@ def single_sls(stack, component, host_target, max_attempts=3):
                     component,
                     'stacks.{0}'.format(stack.pk),
                 ],
-                expr_form=expr_form,
+                tgt_type=tgt_type,
             )
 
             if results['failed']:
@@ -1093,7 +1093,7 @@ def run_command(command_id):
             '{0} and G@stack_id:{1}'.format(command.host_target, stack.id),
             'cmd.run',
             [command.command],
-            expr_form='compound',
+            tgt_type='compound',
         )
 
         result = {}
