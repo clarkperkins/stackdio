@@ -3,7 +3,7 @@
 {% load stackdio %}
 
 {% block scripts %}
-    <script src="{% static 'stackdio/lib/bower_components/requirejs/require.js' %}"></script>
+    <script src="{% static 'lib/requirejs/require.js' %}"></script>
     <script type="text/javascript">
         if (typeof window.stackdio == 'undefined') window.stackdio = {};
         window.stackdio.advancedView = {{ user.settings.advanced_view | lower }};

@@ -221,7 +221,20 @@ STATIC_URL = '/static/'
 STATIC_ROOT = '%s/static/' % FILE_STORAGE_DIRECTORY
 
 # Additional locations of static files
-STATICFILES_DIRS = ()
+STATICFILES_DIRS = []
+
+STATIC_EXTRAS = [
+    'bootstrap/dist',
+    'font-awesome/css/font-awesome.min.css',
+    'fuelux/dist/css',
+    'fuelux/dist/fonts',
+    'fuelux/dist/js',
+    'jquery/dist',
+    'ladda/dist',
+    'requirejs/require.js',
+    'select2/dist',
+    'select2-bootstrap-theme/dist',
+]
 
 # URL that handles the media served from MEDIA_ROOT. Make sure to use a
 # trailing slash.

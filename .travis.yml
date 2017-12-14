@@ -49,8 +49,8 @@ before_install:
 
 ## Customize dependencies
 install:
-  - npm install -g bower
-  - bower install
+  - npm install -g yarn
+  - yarn install
   - pip install -U pip
   - pip install -U wheel
   - pip install -U twine

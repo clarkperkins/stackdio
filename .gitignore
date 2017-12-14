@@ -184,6 +184,7 @@ tests.xml
 **/node_modules/
 stackdio/ui/static/stackdio/app/main.js
 stackdio/ui/static/stackdio/build/
+stackdio/ui/static/lib/
 **/ldap_settings.py
 storage/
 log/

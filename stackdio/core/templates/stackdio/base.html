@@ -41,9 +41,9 @@
     {% if not user_agent_only %}
     <!-- Bootstrap -->
     <link rel="stylesheet" type="text/css" href="//fonts.googleapis.com/css?family=Open+Sans:400,600,300">
-    <link rel="stylesheet" type="text/css" href="{% static 'stackdio/lib/bower_components/bootstrap/dist/css/bootstrap.min.css' %}">
-    <link rel="stylesheet" type="text/css" href="{% static 'stackdio/lib/bower_components/fuelux/dist/css/fuelux.min.css' %}">
-    <link rel="stylesheet" type="text/css" href="{% static 'stackdio/lib/bower_components/font-awesome/css/font-awesome.min.css' %}">
+    <link rel="stylesheet" type="text/css" href="{% static 'lib/bootstrap/dist/css/bootstrap.min.css' %}">
+    <link rel="stylesheet" type="text/css" href="{% static 'lib/fuelux/dist/css/fuelux.min.css' %}">
+    <link rel="stylesheet" type="text/css" href="{% static 'lib/font-awesome/css/font-awesome.min.css' %}">
     <link rel="stylesheet" type="text/css" href="{% static 'stackdio/css/stackdio.css' %}">
 
     <!-- extra stylesheets -->
@@ -171,9 +171,9 @@
     {% block scripts %}
     {# load these in by default if we're not using require - otherwise we'll override this later #}
     <!-- jQuery / bootstrap scripts -->
-    <script src="{% static 'stackdio/lib/bower_components/jquery/dist/jquery.min.js' %}"></script>
-    <script src="{% static 'stackdio/lib/bower_components/bootstrap/dist/js/bootstrap.min.js' %}"></script>
-    <script src="{% static 'stackdio/lib/bower_components/fuelux/dist/js/fuelux.min.js' %}"></script>
+    <script src="{% static 'lib/jquery/dist/jquery.min.js' %}"></script>
+    <script src="{% static 'lib/bootstrap/dist/js/bootstrap.min.js' %}"></script>
+    <script src="{% static 'lib/fuelux/dist/js/fuelux.min.js' %}"></script>
     <script src="{% static 'stackdio/app/utils/mobile-fix.js' %}"></script>
     {% endblock scripts %}
 {% endblock body %}

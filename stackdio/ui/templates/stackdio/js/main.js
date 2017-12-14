@@ -18,25 +18,23 @@
 {% load staticfiles %}
 {# Templatize this file so that the static files always work even if the static url changes #}
 
-{% with '../lib/bower_components' as bower_path %}
-
 requirejs.config({
     baseUrl: '{% static 'stackdio/app' %}',
     paths: {
-        'bloodhound': '{{ bower_path }}/typeahead.js/dist/bloodhound',
-        'bootbox': '{{ bower_path }}/bootbox.js/bootbox',
-        'bootstrap': '{{ bower_path }}/bootstrap/dist/js/bootstrap',
-        'cookie': '{{ bower_path }}/js-cookie/src/js.cookie',
-        'domReady': '{{ bower_path }}/requirejs-domReady/domReady',
-        'fuelux': '{{ bower_path }}/fuelux/dist/js/fuelux',
-        'jquery': '{{ bower_path }}/jquery/dist/jquery',
-        'knockout': '{{ bower_path }}/knockout/dist/knockout',
-        'ladda': '{{ bower_path }}/ladda/js/ladda',
-        'moment': '{{ bower_path }}/moment/moment',
-        'select2': '{{ bower_path }}/select2/dist/js/select2',
-        'spin': '{{ bower_path }}/ladda/js/spin',
-        'typeahead': '{{ bower_path }}/typeahead.js/dist/typeahead.jquery',
-        'underscore': '{{ bower_path }}/underscore/underscore'
+        'bloodhound': '{% static 'lib/typeahead.js/dist/bloodhound' %}',
+        'bootbox': '{% static 'lib/bootbox/bootbox' %}',
+        'bootstrap': '{% static 'lib/bootstrap/dist/js/bootstrap' %}',
+        'cookie': '{% static 'lib/js-cookie/src/js.cookie' %}',
+        'domReady': '{% static 'lib/requirejs-domReady/domReady' %}',
+        'fuelux': '{% static 'lib/fuelux/dist/js/fuelux' %}',
+        'jquery': '{% static 'lib/jquery/dist/jquery' %}',
+        'knockout': '{% static 'lib/knockout/build/output/knockout-latest' %}',
+        'ladda': '{% static 'lib/ladda/js/ladda' %}',
+        'moment': '{% static 'lib/moment/moment' %}',
+        'select2': '{% static 'lib/select2/dist/js/select2' %}',
+        'spin': '{% static 'lib/ladda/js/spin' %}',
+        'typeahead': '{% static 'lib/typeahead.js/dist/typeahead.jquery' %}',
+        'underscore': '{% static 'lib/underscore/underscore' %}'
     },
     shim: {
         bootstrap: {
@@ -60,8 +58,6 @@ requirejs.config({
         }
     }
 });
-
-{% endwith %}
 
 // Add our custom capitalize method
 String.prototype.capitalize = function() {

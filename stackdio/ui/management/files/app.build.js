@@ -1,4 +1,4 @@
-{
+({
     appDir: '../../static/stackdio/app',
     mainConfigFile: '../../static/stackdio/app/main.js',
     dir: '../../static/stackdio/build',
@@ -28,4 +28,4 @@
             ]
         }
     ]
-}
+})

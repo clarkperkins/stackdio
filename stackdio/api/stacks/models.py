@@ -1223,7 +1223,7 @@ class Host(TimeStampedModel):
 
         return self.component_metadatas.filter(
             formula_component__sls_path=sls_path
-        ).order_by('-modified').first()
+        ).latest('modified')
 
     @property
     def provider_metadata(self):

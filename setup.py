@@ -17,6 +17,7 @@
 
 from __future__ import print_function, unicode_literals
 
+import io
 import os
 import sys
 
@@ -42,26 +43,15 @@ if (major, minor) not in supported_versions:
 
 root_dir = os.path.dirname(os.path.abspath(__file__))
 
-bower_dir = 'stackdio/ui/static/stackdio/lib/bower_components'
-
-components_dir = os.path.join(root_dir, bower_dir)
-
-# Force the user to install bower components first
-if not os.path.exists(components_dir):
-    err_msg = ('It looks like you haven\'t installed the bower dependencies yet.  Please run '
-               '`bower install` before using setup.py.\n')
-    sys.stderr.write(err_msg)
-    sys.exit(1)
-
 # Grab the current version from our stackdio package
-from stackdio.server import __version__
+from stackdio.server.version import __version__
 VERSION = __version__
 
 # Short and long descriptions for our package
 SHORT_DESCRIPTION = 'A cloud deployment, automation, and orchestration platform for everyone.'
 
 # Grab README.md and use its contents as the long description
-with open('README.rst') as f:
+with io.open('README.rst', 'rt') as f:
     LONG_DESCRIPTION = f.read()
 
 requirements = [

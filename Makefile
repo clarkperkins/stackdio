@@ -1,17 +1,17 @@
 # Makefile for stackdio-server
 #
 
-.PHONY: all clean bower_install build_ui pep8 pylint test tar wheel
+.PHONY: all clean yarn_install build_ui pep8 pylint test tar wheel
 
 all: build_ui pep8 pylint test tar wheel
 
 clean:
-	rm -rf dist/ build/ *.egg-info/ htmlcov/ tests.xml stackdio/ui/static/stackdio/lib/ stackdio/ui/static/stackdio/build/
+	rm -rf dist/ build/ *.egg-info/ htmlcov/ tests.xml node_modules/ stackdio/ui/static/lib/ stackdio/ui/static/stackdio/build/
 
-bower_install:
-	bower install
+yarn_install:
+	yarn install
 
-build_ui: bower_install
+build_ui: yarn_install
 	python manage.py build_ui
 
 pep8:

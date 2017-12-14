@@ -17,6 +17,7 @@
 
 from __future__ import unicode_literals
 
+import errno
 import io
 import os
 import shutil
@@ -35,14 +36,16 @@ STATIC_DIR = os.path.join(
     'stackdio',
 )
 
+LIB_DIR = os.path.join(
+    settings.BASE_DIR,
+    'stackdio',
+    'ui',
+    'static',
+    'lib',
+)
+
 APP_DIR = os.path.join(STATIC_DIR, 'app')
 BUILD_DIR = os.path.join(STATIC_DIR, 'build')
-
-BOWER_PATH = os.path.join(
-    STATIC_DIR,
-    'lib',
-    'bower_components',
-)
 
 NODE_PATH = os.path.join(
     settings.BASE_DIR,
@@ -69,46 +72,32 @@ class Command(BaseCommand):
     help = 'Optimizes all the javascript files'
 
     def handle(self, *args, **options):
-        try:
-            self._handle(*args, **options)
-        except (KeyboardInterrupt, EOFError):
-            # Clean up after ourselves if somebody quits
-            try:
-                shutil.rmtree(NODE_PATH)
-            except Exception:
-                pass
-
-    def _handle(self, *args, **options):
-        # Force the user to install bower components first
-        if not os.path.exists(BOWER_PATH):
-            err_msg = ('It looks like you haven\'t installed the bower dependencies yet.  '
-                       'Please run `bower install` before using this command.\n')
+        # Force the user to install yarn components first
+        if not os.path.exists(NODE_PATH):
+            err_msg = ('It looks like you haven\'t installed the yarn dependencies yet.  '
+                       'Please run `yarn install` before using this command.\n')
             self.stderr.write(err_msg)
-            sys.exit(1)
-
-        # Install r.js
-        args = ['npm', 'install', 'requirejs']
-        ret = subprocess.call(args, cwd=settings.BASE_DIR)
-
-        if ret:
-            self.stderr.write('Failed to install requirejs with npm.\n')
             sys.exit(1)
 
         # Get rid of our build dir if it's already there
         if os.path.exists(BUILD_DIR):
             shutil.rmtree(BUILD_DIR)
 
+        if os.path.exists(LIB_DIR):
+            shutil.rmtree(LIB_DIR)
+
         main_template = get_template('stackdio/js/main.js')
 
         js = main_template.render({})
 
         # Replace our appDir
-        js = js.replace('{0}stackdio/app'.format(settings.STATIC_URL), '.')
+        js = js.replace('{}stackdio/app'.format(settings.STATIC_URL), '.')
+        js = js.replace('{}lib'.format(settings.STATIC_URL), NODE_PATH)
 
         full_path = os.path.join(APP_DIR, 'main.js')
 
         # Write it to disk
-        with io.open(full_path, 'w') as f:
+        with io.open(full_path, 'wt') as f:
             f.write(js)
 
         # Optimize the project using r.js
@@ -123,17 +112,21 @@ class Command(BaseCommand):
         built_main_file = os.path.join(BUILD_DIR, 'main.js')
 
         # Grab the contents of the build main file
-        with io.open(built_main_file, 'r') as f:
+        with io.open(built_main_file, 'rt') as f:
             built_main_js = f.read()
 
         # Fix the built main file
         built_main_js = built_main_js.replace(
             'baseUrl:"."',
-            'baseUrl:"{0}stackdio/build"'.format(settings.STATIC_URL)
+            'baseUrl:"{}stackdio/build"'.format(settings.STATIC_URL)
+        )
+        built_main_js = built_main_js.replace(
+            NODE_PATH,
+            '{}lib'.format(settings.STATIC_URL)
         )
 
         # Write it back out to disk
-        with io.open(built_main_file, 'w') as f:
+        with io.open(built_main_file, 'wt') as f:
             f.write(built_main_js)
 
         # Get rid of temporary main.js
@@ -142,5 +135,17 @@ class Command(BaseCommand):
         # Remove the extra build.txt file r.js throws in
         os.remove(os.path.join(BUILD_DIR, 'build.txt'))
 
-        # Get rid of our node_modules
-        shutil.rmtree(NODE_PATH)
+        # Copy the extras
+        for extra in settings.STATIC_EXTRAS:
+            src = os.path.join(NODE_PATH, extra)
+            dest = os.path.join(LIB_DIR, extra)
+
+            if os.path.isdir(src):
+                shutil.copytree(src, dest)
+            else:
+                try:
+                    os.makedirs(os.path.dirname(dest))
+                except IOError as e:
+                    if e.errno != errno.EEXIST:
+                        raise
+                shutil.copy2(src, dest)
