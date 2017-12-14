@@ -30,10 +30,12 @@ import salt.utils
 import salt.utils.event
 from salt.utils.gitfs import (
     GitFS,
+    GitProvider,
     GitPython,
 )
 
-PER_REMOTE_OVERRIDES = ('base', 'mountpoint', 'root', 'ssl_verify', 'privkey')
+PER_REMOTE_OVERRIDES = ('base', 'mountpoint', 'root', 'ssl_verify', 'privkey'
+                        'env_whitelist', 'env_blacklist', 'refspecs')
 
 _INVALID_REPO = (
     'Cache path {0} (corresponding remote: {1}) exists but is not a valid '
@@ -46,8 +48,12 @@ logger = logging.getLogger(__name__)
 
 class StackdioGitPython(GitPython):
 
-    def __init__(self, *args, **kwargs):
-        super(StackdioGitPython, self).__init__(*args, **kwargs)
+    def __init__(self, opts, remote, per_remote_defaults, per_remote_only,
+                 override_params, cache_root, role='gitfs'):
+        self.provider = 'stackdiogitpython'
+        self.cache_root = cache_root
+        GitProvider.__init__(self, opts, remote, per_remote_defaults,
+                             per_remote_only, override_params, cache_root, role)
         # Set these lists
         self.env_whitelist = None
         self.env_blacklist = None
@@ -59,7 +65,7 @@ class StackdioGitPython(GitPython):
 
         if private_key_file:
             git_wrapper = salt.utils.path_join(self.cache_root, '{}.sh'.format(self.hash))
-            with io.open(git_wrapper, 'w') as f:
+            with io.open(git_wrapper, 'wt') as f:
                 f.write('#!/bin/bash\n')
                 f.write('SSH=$(which ssh)\n')
                 f.write('exec $SSH -o StrictHostKeyChecking=no -i {} "$@"\n'.format(

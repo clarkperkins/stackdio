@@ -258,7 +258,7 @@ class StackdioSaltCloudClient(salt.cloud.CloudClient):
                 return mapper.run_map(dmap)
 
             # This should catch our failures and retry
-            return salt.utils.cloud.simple_types_filter(do_launch())
+            return salt.utils.simple_types_filter(do_launch())
 
         finally:
             # Cancel the logging, but make sure it still gets cancelled if an exception is thrown
@@ -299,7 +299,7 @@ class StackdioSaltCloudClient(salt.cloud.CloudClient):
 
         if names:
             logger.info(msg)
-            return salt.utils.cloud.simple_types_filter(mapper.destroy(names))
+            return salt.utils.simple_types_filter(mapper.destroy(names))
         else:
             logger.info('There are no VMs to be destroyed.')
             return {}

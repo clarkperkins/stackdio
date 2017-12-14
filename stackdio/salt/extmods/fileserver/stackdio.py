@@ -41,6 +41,11 @@ import salt.utils
 from salt.utils.event import tagify
 
 
+PER_REMOTE_OVERRIDES = ('base', 'mountpoint', 'root', 'ssl_verify',
+                        'env_whitelist', 'env_blacklist', 'refspecs')
+PER_REMOTE_ONLY = ('name', 'saltenv')
+
+
 log = logging.getLogger(__name__)
 
 
@@ -146,19 +151,57 @@ def _get_dir_list(saltenv):
     return [_get_env_dir(saltenv)]
 
 
-def find_file(path, saltenv='base', env=None, **kwargs):
+def clear_cache():
+    """
+    Completely clear gitfs cache for each formula
+    """
+    errors = []
+
+    for formula in Formula.objects.all():
+        gitfs = formula.get_gitfs()
+        errors.extend(gitfs.clear_cache())
+
+    return errors
+
+
+def clear_lock(remote=None, lock_type='update'):
+    """
+    Clear update.lk
+    """
+    cleared = []
+    errors = []
+    for formula in Formula.objects.all():
+        gitfs = formula.get_gitfs()
+        fc, fe = gitfs.clear_lock(remote=remote, lock_type=lock_type)
+        cleared.extend(fc)
+        errors.extend(fe)
+
+    return cleared, errors
+
+
+def lock(remote=None):
+    """
+    Place an update.lk
+
+    ``remote`` can either be a dictionary containing repo configuration
+    information, or a pattern. If the latter, then remotes for which the URL
+    matches the pattern will be locked.
+    """
+    locked = []
+    errors = []
+    for formula in Formula.objects.all():
+        gitfs = formula.get_gitfs()
+        fl, fe = gitfs.lock(remote=remote)
+        locked.extend(fl)
+        errors.extend(fe)
+
+    return locked, errors
+
+
+def find_file(path, saltenv='base', **kwargs):
     """
     Search the environment for the relative path
     """
-    if env is not None:
-        salt.utils.warn_until(
-            'Carbon',
-            'Passing a salt environment should be done using \'saltenv\' '
-            'not \'env\'. This functionality will be removed in Salt Carbon.'
-        )
-        # Backwards compatibility
-        saltenv = env
-
     path = os.path.normpath(path)
     fnd = {'path': '',
            'rel': ''}
@@ -205,21 +248,13 @@ def envs():
     for account in CloudAccount.objects.all():
         ret.append('cloud.{}'.format(account.slug))
 
-    return ret
+    return sorted(ret)
 
 
 def serve_file(load, fnd):
     """
     Return a chunk from a file based on the data received
     """
-    if 'env' in load:
-        salt.utils.warn_until(
-            'Carbon',
-            'Passing a salt environment should be done using \'saltenv\' '
-            'not \'env\'. This functionality will be removed in Salt Carbon.'
-        )
-        load['saltenv'] = load.pop('env')
-
     ret = {'data': '',
            'dest': ''}
     if 'path' not in load or 'loc' not in load or 'saltenv' not in load:
